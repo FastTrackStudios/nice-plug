@@ -33,4 +33,16 @@ pub trait InitContext<P: Plugin> {
     /// allows the host to better optimize polyphonic modulation, or to switch to strictly monophonic
     /// modulation when dropping the capacity down to 1.
     fn set_current_voice_capacity(&self, capacity: u32);
+
+    /// Get a raw pointer to the host-specific context.
+    ///
+    /// For CLAP plugins in REAPER, cast the returned pointer to `clap_host*` and call
+    /// `get_extension("cockos.reaper_extension")` on it to obtain a `reaper_plugin_info_t*`
+    /// for REAPER API access.
+    ///
+    /// Returns `None` for plugin APIs that don't expose a raw host pointer (the default), or
+    /// when not running inside a DAW.
+    fn raw_host_context(&self) -> Option<*const std::ffi::c_void> {
+        None
+    }
 }

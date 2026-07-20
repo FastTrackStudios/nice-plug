@@ -10,6 +10,10 @@ members = [
   "crates/xtask",
   "crates/nice-plug-egui",
   "crates/nice-plug-iced",
+  "crates/nice-plug-dioxus",
+  # Pinned baseview fork (raw-window-handle 0.6) used only by nice-plug-dioxus's
+  # own windows; the rest of the workspace uses crates.io baseview 0.2.
+  "vendor/baseview",
 
   "examples/byo_gui_gl",
   "examples/byo_gui_softbuffer",

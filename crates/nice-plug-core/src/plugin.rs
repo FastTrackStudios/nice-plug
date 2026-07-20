@@ -12,7 +12,7 @@ use crate::{
     audio_setup::{AudioIOLayout, AuxiliaryBuffers, BufferConfig},
     buffer::Buffer,
     context::{gui::AsyncExecutor, init::InitContext, process::ProcessContext},
-    editor::Editor,
+    editor::{Editor, EmbeddedEditor},
     midi::{MidiConfig, sysex::SysExMessage},
     params::Params,
 };
@@ -169,6 +169,22 @@ pub trait Plugin: Default + Send + 'static {
     /// Queried only once immediately after the plugin instance is created. This function takes
     /// `&mut self` to make it easier to move data into the `Editor` implementation.
     fn editor(&mut self, async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        None
+    }
+
+    /// The embedded FX UI renderer for displaying inline in REAPER's TCP/MCP.
+    ///
+    /// This is separate from the regular [`editor()`][Self::editor()] and provides a small inline
+    /// UI that renders directly in REAPER's track or mixer panel. This is useful for showing
+    /// meters, simple controls, or visualizations without opening a full editor window.
+    ///
+    /// The embedded editor renders to a CPU bitmap buffer, so it should be lightweight and avoid
+    /// expensive rendering operations.
+    ///
+    /// Note: This is currently only supported in REAPER via the CLAP plugin format.
+    ///
+    /// Queried only once immediately after the plugin instance is created.
+    fn embedded_editor(&mut self) -> Option<Arc<dyn EmbeddedEditor>> {
         None
     }
 

@@ -34,8 +34,8 @@ use clap_sys::ext::note_ports::{
 use clap_sys::ext::params::{
     CLAP_EXT_PARAMS, CLAP_PARAM_IS_AUTOMATABLE, CLAP_PARAM_IS_BYPASS, CLAP_PARAM_IS_HIDDEN,
     CLAP_PARAM_IS_MODULATABLE, CLAP_PARAM_IS_MODULATABLE_PER_NOTE_ID, CLAP_PARAM_IS_READONLY,
-    CLAP_PARAM_IS_STEPPED, CLAP_PARAM_RESCAN_VALUES, clap_host_params, clap_param_info,
-    clap_plugin_params,
+    CLAP_PARAM_IS_STEPPED, CLAP_PARAM_RESCAN_INFO, CLAP_PARAM_RESCAN_VALUES, clap_host_params,
+    clap_param_info, clap_plugin_params,
 };
 use clap_sys::ext::remote_controls::{
     CLAP_EXT_REMOTE_CONTROLS, clap_plugin_remote_controls, clap_remote_controls_page,
@@ -48,8 +48,10 @@ use clap_sys::ext::state::{CLAP_EXT_STATE, clap_plugin_state};
 use clap_sys::ext::tail::{CLAP_EXT_TAIL, clap_plugin_tail};
 use clap_sys::ext::thread_check::{CLAP_EXT_THREAD_CHECK, clap_host_thread_check};
 use clap_sys::ext::track_info::{
-    CLAP_EXT_TRACK_INFO, CLAP_TRACK_INFO_HAS_TRACK_COLOR, CLAP_TRACK_INFO_HAS_TRACK_NAME,
-    clap_host_track_info, clap_plugin_track_info, clap_track_info,
+    CLAP_EXT_TRACK_INFO, CLAP_TRACK_INFO_HAS_AUDIO_CHANNEL, CLAP_TRACK_INFO_HAS_TRACK_COLOR,
+    CLAP_TRACK_INFO_HAS_TRACK_NAME, CLAP_TRACK_INFO_IS_FOR_BUS, CLAP_TRACK_INFO_IS_FOR_MASTER,
+    CLAP_TRACK_INFO_IS_FOR_RETURN_TRACK, clap_host_track_info, clap_plugin_track_info,
+    clap_track_info,
 };
 use clap_sys::ext::voice_info::{
     CLAP_EXT_VOICE_INFO, CLAP_VOICE_INFO_SUPPORTS_OVERLAPPING_NOTES, clap_host_voice_info,
@@ -69,15 +71,15 @@ use crossbeam::channel::{self, SendTimeoutError};
 use crossbeam::queue::ArrayQueue;
 use fragile::Fragile;
 use nice_plug_core::audio_setup::{AudioIOLayout, AuxiliaryBuffers, BufferConfig, ProcessMode};
-use nice_plug_core::context::gui::AsyncExecutor;
+use nice_plug_core::context::gui::{AsyncExecutor, TrackInfo};
 use nice_plug_core::context::process::Transport;
-use nice_plug_core::editor::{Editor, ParentWindowHandle, dpi::PhysicalSize};
+use nice_plug_core::editor::{Editor, EmbeddedEditor, ParentWindowHandle, dpi::PhysicalSize};
 use nice_plug_core::midi::sysex::SysExMessage;
 use nice_plug_core::midi::{MidiConfig, NoteEvent, PluginNoteEvent};
 use nice_plug_core::params::internals::ParamPtr;
 use nice_plug_core::params::{ParamFlags, Params};
 use nice_plug_core::plugin::{
-    Plugin, PluginState, ProcessStatus, TaskExecutor, TrackColor, TrackInfo,
+    Plugin, PluginState, ProcessStatus, TaskExecutor, TrackColor, TrackInfo as PluginTrackInfo,
 };
 use parking_lot::Mutex;
 use std::any::Any;
@@ -95,6 +97,9 @@ use std::time::Duration;
 
 use super::context::{WrapperGuiContext, WrapperInitContext, WrapperProcessContext};
 use super::descriptor::PluginDescriptor;
+use super::reaper_embed::{
+    handle_embed_message, ClapPluginReaperEmbedUi, CLAP_EXT_REAPER_EMBED_UI,
+};
 use super::util::ClapPtr;
 use crate::event_loop::{BackgroundThread, EventLoop, MainThreadExecutor, TASK_QUEUE_CAPACITY};
 use crate::midi::MidiResult;
@@ -131,6 +136,9 @@ pub struct Wrapper<P: ClapPlugin> {
     /// A handle for the currently active editor instance. The plugin should implement `Drop` on
     /// this handle for its closing behavior.
     editor_handle: Mutex<Option<Fragile<Box<dyn Any>>>>,
+    /// The plugin's embedded editor for REAPER's inline FX UI, if it has one.
+    /// Wrapped in an `AtomicRefCell` because it needs to be initialized late.
+    embedded_editor: AtomicRefCell<Option<Arc<dyn EmbeddedEditor>>>,
     /// The DPI scaling factor as passed to the [IPlugViewContentScaleSupport::set_scale_factor()]
     /// function. Defaults to 1.0, and will be kept there on macOS. When reporting and handling size
     /// the sizes communicated to and from the DAW should be scaled by this factor since nice-plug's
@@ -181,8 +189,11 @@ pub struct Wrapper<P: ClapPlugin> {
     /// The receiver belonging to [`new_state_sender`][Self::new_state_sender].
     updated_state_receiver: channel::Receiver<PluginState>,
 
-    // We'll query all of the host's extensions upfront
-    host_callback: ClapPtr<clap_host>,
+    // We'll query all of the host's extensions upfront.
+    // `pub(super)` so `WrapperInitContext::raw_host_context` (in the sibling
+    // `context` module) can hand the raw `clap_host*` to DAW-specific APIs
+    // (e.g. REAPER's "cockos.reaper_extension").
+    pub(super) host_callback: ClapPtr<clap_host>,
 
     clap_plugin_audio_ports_config: clap_plugin_audio_ports_config,
 
@@ -197,6 +208,9 @@ pub struct Wrapper<P: ClapPlugin> {
 
     clap_plugin_gui: clap_plugin_gui,
     host_gui: AtomicRefCell<Option<ClapPtr<clap_host_gui>>>,
+
+    /// The CLAP extension vtable for REAPER's embedded UI (`cockos.reaper_embedui`).
+    clap_plugin_reaper_embed_ui: ClapPluginReaperEmbedUi,
 
     clap_plugin_latency: clap_plugin_latency,
     host_latency: AtomicRefCell<Option<ClapPtr<clap_host_latency>>>,
@@ -253,14 +267,19 @@ pub struct Wrapper<P: ClapPlugin> {
 
     clap_plugin_tail: clap_plugin_tail,
 
-    clap_plugin_track_info: clap_plugin_track_info,
-    host_track_info: AtomicRefCell<Option<ClapPtr<clap_host_track_info>>>,
-    /// The most recently reported track information. Hosts may send partial updates, so this is used
-    /// to merge successive track info queries.
-    current_track_info: AtomicRefCell<TrackInfo>,
-
     clap_plugin_voice_info: clap_plugin_voice_info,
     host_voice_info: AtomicRefCell<Option<ClapPtr<clap_host_voice_info>>>,
+
+    /// The `clap.track-info/1` plugin vtable. The host calls `changed()` on it
+    /// whenever the track this instance lives on changes (name, color, etc.).
+    clap_plugin_track_info: clap_plugin_track_info,
+    /// The host's track-info extension, queried during `init()`. Used to pull the
+    /// current track info on demand.
+    host_track_info: AtomicRefCell<Option<ClapPtr<clap_host_track_info>>>,
+    /// The latest track info reported by the host, refreshed during `init()` and
+    /// whenever the host signals a change. Read by the editor via
+    /// [`GuiContext::track_info()`]. `None` until the host first reports it.
+    track_info: AtomicRefCell<Option<TrackInfo>>,
     /// If `P::CLAP_POLY_MODULATION_CONFIG` is set, then the plugin can configure the current number
     /// of active voices using a context method called from the initialization or processing
     /// context. This defaults to the maximum number of voices.
@@ -303,6 +322,12 @@ pub enum Task<P: Plugin> {
     VoiceInfoChanged,
     /// Tell the host that it should rescan the current parameter values.
     RescanParamValues,
+    /// Tell the host to rescan parameter info (names, module paths, visibility).
+    /// Corresponds to `CLAP_PARAM_RESCAN_INFO`.
+    RescanParamInfo,
+    /// Tell the host to fully rescan all parameters (structural changes, ranges, steps).
+    /// Corresponds to `CLAP_PARAM_RESCAN_ALL` and triggers a restart cycle.
+    RescanParamAll,
 }
 
 /// The types of CLAP parameter updates for events.
@@ -453,6 +478,21 @@ impl<P: ClapPlugin> MainThreadExecutor<Task<P>> for Wrapper<P> {
                     crate::nice_debug_assert_failure!("The host does not support parameters? What?")
                 }
             },
+            Task::RescanParamInfo => match &*self.host_params.borrow() {
+                Some(host_params) => {
+                    crate::nice_debug_assert!(is_gui_thread);
+                    unsafe_clap_call! { host_params=>rescan(&*self.host_callback, CLAP_PARAM_RESCAN_INFO) };
+                }
+                None => {
+                    crate::nice_debug_assert_failure!("The host does not support parameters? What?")
+                }
+            },
+            Task::RescanParamAll => {
+                crate::nice_debug_assert!(is_gui_thread);
+                // RESCAN_ALL requires a restart cycle (deactivate → rescan → activate).
+                // request_restart() tells the host to do this.
+                unsafe_clap_call! { &*self.host_callback=>request_restart(&*self.host_callback) };
+            }
         };
     }
 }
@@ -575,6 +615,8 @@ impl<P: ClapPlugin> Wrapper<P> {
             // Initialized later as it needs a reference to the wrapper for the async executor
             editor: AtomicRefCell::new(None),
             editor_handle: Mutex::new(None),
+            // Initialized later (in `init()`) as it needs a reference to the plugin
+            embedded_editor: AtomicRefCell::new(None),
             scale_factor: AtomicF64::new(1.0),
 
             is_activated: AtomicBool::new(false),
@@ -651,6 +693,10 @@ impl<P: ClapPlugin> Wrapper<P> {
             },
             host_gui: AtomicRefCell::new(None),
 
+            clap_plugin_reaper_embed_ui: ClapPluginReaperEmbedUi {
+                inline_editor: Some(Self::ext_reaper_embed_inline_editor),
+            },
+
             clap_plugin_latency: clap_plugin_latency {
                 get: Some(Self::ext_latency_get),
             },
@@ -701,16 +747,16 @@ impl<P: ClapPlugin> Wrapper<P> {
                 get: Some(Self::ext_tail_get),
             },
 
-            clap_plugin_track_info: clap_plugin_track_info {
-                changed: Some(Self::ext_track_info_changed),
-            },
-            host_track_info: AtomicRefCell::new(None),
-            current_track_info: AtomicRefCell::new(TrackInfo::default()),
-
             clap_plugin_voice_info: clap_plugin_voice_info {
                 get: Some(Self::ext_voice_info_get),
             },
             host_voice_info: AtomicRefCell::new(None),
+
+            clap_plugin_track_info: clap_plugin_track_info {
+                changed: Some(Self::ext_track_info_changed),
+            },
+            host_track_info: AtomicRefCell::new(None),
+            track_info: AtomicRefCell::new(None),
             current_voice_capacity: AtomicU32::new(
                 P::CLAP_POLY_MODULATION_CONFIG
                     .map(|c| {
@@ -779,6 +825,10 @@ impl<P: ClapPlugin> Wrapper<P> {
                 }),
             ))
             .map(Mutex::new);
+
+        // Initialize the embedded editor for REAPER's inline FX UI support. This is queried once,
+        // right after the plugin instance is created, just like the regular editor.
+        *wrapper.embedded_editor.borrow_mut() = wrapper.plugin.lock().embedded_editor();
 
         wrapper
     }
@@ -1868,53 +1918,6 @@ impl<P: ClapPlugin> Wrapper<P> {
         }
     }
 
-    /// Query the host for the current track information and notify the plugin if anything changed.
-    fn update_track_info_from_host(&self) {
-        let host_track_info = self.host_track_info.borrow();
-        let Some(host_track_info) = host_track_info.as_ref() else {
-            return;
-        };
-
-        permit_alloc(|| {
-            let mut clap_info: clap_track_info = unsafe { mem::zeroed() };
-            let success = unsafe_clap_call! {
-                host_track_info=>get(&*self.host_callback, &mut clap_info)
-            };
-            if !success {
-                return;
-            }
-
-            let mut current_track_info = self.current_track_info.borrow_mut();
-            let mut name = current_track_info.name().to_owned();
-            let mut color = current_track_info.color();
-
-            if clap_info.flags & CLAP_TRACK_INFO_HAS_TRACK_NAME != 0 {
-                let name_bytes = unsafe {
-                    std::slice::from_raw_parts(
-                        clap_info.name.as_ptr().cast::<u8>(),
-                        clap_sys::string_sizes::CLAP_NAME_SIZE,
-                    )
-                };
-                if let Ok(cstr) = CStr::from_bytes_until_nul(name_bytes) {
-                    name = cstr.to_string_lossy().into_owned()
-                } // Else there is no null terminator. In this case we do nothing with the name.
-            }
-
-            if clap_info.flags & CLAP_TRACK_INFO_HAS_TRACK_COLOR != 0 {
-                color = Some(TrackColor::new(
-                    clap_info.color.red,
-                    clap_info.color.green,
-                    clap_info.color.blue,
-                    clap_info.color.alpha,
-                ));
-            }
-
-            let track_info = TrackInfo::new(name, color);
-            *current_track_info = track_info.clone();
-            self.plugin.lock().track_info_updated(track_info);
-        });
-    }
-
     /// Immediately set the plugin state. Returns `false` if the deserialization failed. The plugin
     /// state is set from a couple places, so this function aims to deduplicate that. Includes
     /// `permit_alloc()`s around the deserialization and initialization for the use case where
@@ -2010,7 +2013,10 @@ impl<P: ClapPlugin> Wrapper<P> {
             );
         }
 
-        wrapper.update_track_info_from_host();
+        // Pull the initial track info now that the host extension is available, so
+        // the editor sees the right track name as soon as it opens (this also
+        // notifies the plugin via `Plugin::track_info_updated`).
+        wrapper.refresh_track_info();
 
         true
     }
@@ -2526,9 +2532,40 @@ impl<P: ClapPlugin> Wrapper<P> {
             &wrapper.clap_plugin_track_info as *const _ as *const c_void
         } else if id == CLAP_EXT_VOICE_INFO && P::CLAP_POLY_MODULATION_CONFIG.is_some() {
             &wrapper.clap_plugin_voice_info as *const _ as *const c_void
+        } else if id == CLAP_EXT_REAPER_EMBED_UI && wrapper.embedded_editor.borrow().is_some() {
+            // Only report that we support REAPER's embedded UI extension if the plugin has an
+            // embedded editor.
+            &wrapper.clap_plugin_reaper_embed_ui as *const _ as *const c_void
         } else {
             crate::nice_trace!("Host tried to query unknown extension {:?}", id);
             std::ptr::null()
+        }
+    }
+
+    /// REAPER's embedded UI extension callback.
+    ///
+    /// This handles all messages from REAPER for inline FX UI rendering in the TCP/MCP. This
+    /// extension is only exposed (see [`get_extension()`][Self::get_extension()]) when the plugin
+    /// has an embedded editor.
+    unsafe extern "C" fn ext_reaper_embed_inline_editor(
+        plugin: *const clap_plugin,
+        msg: i32,
+        param1: *mut c_void,
+        param2: *mut c_void,
+    ) -> isize {
+        check_null_ptr!(0, plugin, unsafe { (*plugin).plugin_data });
+        let wrapper = unsafe { &*((*plugin).plugin_data as *const Self) };
+
+        match &*wrapper.embedded_editor.borrow() {
+            Some(embedded_editor) => unsafe {
+                handle_embed_message(embedded_editor, msg, param1, param2)
+            },
+            None => {
+                crate::nice_debug_assert_failure!(
+                    "REAPER embed UI callback received but no embedded editor is registered"
+                );
+                0
+            }
         }
     }
 
@@ -3062,9 +3099,13 @@ impl<P: ClapPlugin> Wrapper<P> {
     }
 
     unsafe extern "C" fn ext_gui_show(_plugin: *const clap_plugin) -> bool {
-        // TODO: Does this get used? Is this only for the free-standing window extension? (which we
-        //       don't implement) This wouldn't make any sense for embedded editors.
-        false
+        // Our embedded editor is already spawned and visible as soon as the host
+        // calls `set_parent` (see `ext_gui_set_parent`), so there's nothing extra
+        // to do here. Report success: strict CLAP hosts (e.g. the daw-standalone
+        // clap host) treat a `false` return as a fatal `GuiShow` error and refuse
+        // to display the plugin. (Returning `false` here is an upstream nih-plug
+        // quirk that breaks those hosts.)
+        true
     }
 
     unsafe extern "C" fn ext_gui_hide(_plugin: *const clap_plugin) -> bool {
@@ -3455,13 +3496,6 @@ impl<P: ClapPlugin> Wrapper<P> {
         }
     }
 
-    unsafe extern "C" fn ext_track_info_changed(plugin: *const clap_plugin) {
-        check_null_ptr!((), plugin, unsafe { (*plugin).plugin_data });
-        let wrapper = unsafe { &*((*plugin).plugin_data as *const Self) };
-
-        wrapper.update_track_info_from_host();
-    }
-
     unsafe extern "C" fn ext_tail_get(plugin: *const clap_plugin) -> u32 {
         check_null_ptr!(0, plugin, unsafe { (*plugin).plugin_data });
         let wrapper = unsafe { &*((*plugin).plugin_data as *const Self) };
@@ -3498,6 +3532,94 @@ impl<P: ClapPlugin> Wrapper<P> {
             }
             None => false,
         }
+    }
+
+    /// Pull the current track info from the host (via `clap.track-info/1`) into
+    /// [`track_info`][Self::track_info]. No-op if the host doesn't support the
+    /// extension. Called from `init()` and whenever the host signals a change.
+    fn refresh_track_info(&self) {
+        let host_track_info = self.host_track_info.borrow();
+        let Some(host_track_info) = host_track_info.as_ref() else {
+            return;
+        };
+        let Some(get) = host_track_info.get else {
+            return;
+        };
+
+        // SAFETY: `clap_track_info` is plain old data; we zero-initialize it and
+        // let the host fill in the fields it has (signalled via `flags`).
+        let mut raw: clap_track_info = unsafe { std::mem::zeroed() };
+        let ok = unsafe { get(&*self.host_callback, &mut raw) };
+
+        let info = if ok {
+            Some(Self::track_info_from_clap(&raw))
+        } else {
+            // The host has no track info for this instance (e.g. unbound).
+            None
+        };
+
+        *self.track_info.borrow_mut() = info.clone();
+
+        // Also notify the plugin itself (upstream's `Plugin::track_info_updated`
+        // API), converting to the plugin-facing name+color shape.
+        if let Some(info) = info {
+            let color = info
+                .color
+                .map(|(r, g, b, a)| TrackColor::new(r, g, b, a));
+            self.plugin.lock().track_info_updated(PluginTrackInfo::new(
+                info.name.clone().unwrap_or_default(),
+                color,
+            ));
+        }
+    }
+
+    /// The latest track info the host has reported for this instance, or `None`
+    /// if the host doesn't support `clap.track-info/1` or hasn't bound a track.
+    /// Read by the editor through [`GuiContext::track_info()`].
+    pub(crate) fn current_track_info(&self) -> Option<TrackInfo> {
+        self.track_info.borrow().clone()
+    }
+
+    /// Convert a host-provided `clap_track_info` into nice-plug's [`TrackInfo`],
+    /// honouring the `flags` that say which fields are actually populated.
+    fn track_info_from_clap(raw: &clap_track_info) -> TrackInfo {
+        let name = if raw.flags & CLAP_TRACK_INFO_HAS_TRACK_NAME != 0 {
+            // `name` is a NUL-terminated C string buffer.
+            let cstr = unsafe { CStr::from_ptr(raw.name.as_ptr()) };
+            Some(cstr.to_string_lossy().into_owned()).filter(|s| !s.is_empty())
+        } else {
+            None
+        };
+
+        let color = if raw.flags & CLAP_TRACK_INFO_HAS_TRACK_COLOR != 0 {
+            Some((raw.color.red, raw.color.green, raw.color.blue, raw.color.alpha))
+        } else {
+            None
+        };
+
+        let channel_count = if raw.flags & CLAP_TRACK_INFO_HAS_AUDIO_CHANNEL != 0 {
+            Some(raw.audio_channel_count)
+        } else {
+            None
+        };
+
+        TrackInfo {
+            name,
+            color,
+            channel_count,
+            is_return: raw.flags & CLAP_TRACK_INFO_IS_FOR_RETURN_TRACK != 0,
+            is_bus: raw.flags & CLAP_TRACK_INFO_IS_FOR_BUS != 0,
+            is_master: raw.flags & CLAP_TRACK_INFO_IS_FOR_MASTER != 0,
+        }
+    }
+
+    /// `clap.track-info/1`: the host calls this on the main thread whenever the
+    /// track this instance is on changes. We re-pull the info; the editor reads
+    /// the refreshed cache on its next render (it polls on every tick).
+    unsafe extern "C" fn ext_track_info_changed(plugin: *const clap_plugin) {
+        check_null_ptr!((), plugin, unsafe { (*plugin).plugin_data });
+        let wrapper = unsafe { &*((*plugin).plugin_data as *const Self) };
+        wrapper.refresh_track_info();
     }
 }
 

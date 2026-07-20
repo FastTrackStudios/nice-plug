@@ -46,7 +46,7 @@ pub struct Gain {
     initial_gui_state: Option<GuiState>,
 
     /// Track information reported by the host through [`Plugin::track_info_updated()`].
-    track_info: Arc<Mutex<TrackInfo>>,
+    track_info: Arc<Mutex<PluginTrackInfo>>,
 }
 
 #[derive(Params)]
@@ -97,7 +97,7 @@ impl Default for Gain {
                 next_value: 0,
             }),
 
-            track_info: Arc::new(std::sync::Mutex::new(TrackInfo::default())),
+            track_info: Arc::new(std::sync::Mutex::new(PluginTrackInfo::default())),
         }
     }
 }
@@ -454,7 +454,7 @@ impl Plugin for Gain {
         ProcessStatus::Normal
     }
 
-    fn track_info_updated(&mut self, info: TrackInfo) {
+    fn track_info_updated(&mut self, info: PluginTrackInfo) {
         if let Ok(mut track_info) = self.track_info.lock() {
             *track_info = info;
         }

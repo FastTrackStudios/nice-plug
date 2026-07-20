@@ -1,0 +1,87 @@
+[package]
+name = "nice-plug-dioxus"
+version = "0.1.0"
+# NOTE: kept on edition 2021 (the workspace is 2024). The Dioxus/Blitz rendering
+# code was authored against 2021 and isn't audited for 2024's stricter rules yet.
+# Revisit once the port is green.
+edition = "2021"
+authors = ["Cody Wright"]
+license = "ISC"
+description = "Dioxus Native GUI support for nice-plug (Blitz + Vello + wgpu)"
+
+[features]
+default = ["hot-reload"]
+hot-reload = ["dep:dioxus-devtools"]
+# Embedded editor support (REAPER TCP/MCP inline UI).
+# NOT YET AVAILABLE in the nice-plug port: requires the embedded-editor API to be
+# ported into nice-plug-core first (see src/embedded.rs). Enabling this currently
+# emits a compile_error with instructions.
+embedded = ["dep:anyrender_vello_cpu"]
+# Use CPU rendering with softbuffer (works on Linux/XWayland where wgpu surfaces fail)
+cpu-rendering = ["dep:anyrender_vello_cpu", "dep:softbuffer"]
+# Use wgpu offscreen rendering + softbuffer blit (works on Linux/XWayland, keeps GPU rendering)
+softbuffer-blit = ["dep:softbuffer"]
+
+[dependencies]
+# The nice-plug core abstraction layer (Editor trait, GuiContext, Params, persist).
+nice-plug-core = { path = "../nice-plug-core", version = "0.2.0" }
+
+# Use dioxus-native from blitz repo which includes all the rendering + re-exports dioxus core.
+# Pinned to a specific blitz commit for reproducibility — bump `rev` to update upstream.
+dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", rev = "727dab0105fb42659f76f7862040b82f4e982893", features = ["prelude"] }
+
+# Blitz crates from git for latest CSS support
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "727dab0105fb42659f76f7862040b82f4e982893" }
+blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git", rev = "727dab0105fb42659f76f7862040b82f4e982893" }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "727dab0105fb42659f76f7862040b82f4e982893" }
+
+# Rendering — matched to blitz @ 9ebd23a's workspace versions (anyrender 0.10 /
+# anyrender_vello 0.10 / vello 0.9 / wgpu 29 / wgpu_context 0.6 /
+# anyrender_vello_cpu 0.12). Keeping these in lockstep with blitz guarantees a
+# single resolved version of `anyrender` so its `PaintScene` trait lines up.
+anyrender_vello = "0.11"
+vello = { version = "0.9", features = ["wgpu"] }
+wgpu = "29"
+wgpu_context = "0.6"  # For DeviceHandle type used by CustomPaintSource
+
+# anyrender base traits (RenderContext / ResourceId) — re-exported for consumers
+# implementing wgpu custom-paint <canvas> sources via the 0.10 texture-registration API.
+anyrender = "0.11"
+
+# CPU rendering for embedded editor (optional)
+anyrender_vello_cpu = { version = "0.14", optional = true }
+softbuffer = { version = "0.4", optional = true }
+
+# Window management - using fork with raw-window-handle 0.6 for softbuffer compatibility.
+# NOTE: nice-plug-core links raw-window-handle 0.5; this crate deliberately links 0.6
+# (required by blitz/wgpu 28) and bridges ParentWindowHandle via a manual adapter in editor.rs.
+# Vendored at libs/vendor/baseview — the fork repo this pinned
+# (Codys-Wright/baseview.git @ upgrade_rwh, 00e438ff) was deleted
+# upstream, which broke `cargo metadata` on every fresh CARGO_HOME
+# (hosted CI runners) and needed a fetch override in the flake's crane
+# vendoring. Same tree, now a path dep.
+baseview = { path = "../../vendor/baseview", package = "baseview" }
+
+# raw-window-handle 0.6 (compatible with baseview fork, wgpu, and softbuffer)
+raw-window-handle = "0.6"
+x11-dl = "2"
+
+# Hot reload
+dioxus-devtools = { version = "0.7", optional = true }
+
+# Utilities
+crossbeam = "0.8"
+parking_lot = "0.12"
+serde = { version = "1.0", features = ["derive"] }
+futures-util = "0.3"
+pollster = "0.4"
+libc = "0.2"
+# Use the same keyboard-types version as baseview to avoid conflicts
+keyboard-types = "0.6"
+# Same smol_str version as blitz-traits for BlitzKeyEvent text field
+smol_str = "0.3"
+cursor-icon = "1"
+
+[dev-dependencies]
+# Example needs these directly
+pollster = "0.4"

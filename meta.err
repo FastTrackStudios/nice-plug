@@ -1,0 +1,122 @@
+    Updating crates.io index
+    Updating git repository `https://github.com/DioxusLabs/blitz.git`
+     Locking 949 packages to latest Rust 1.87 compatible versions
+      Adding anyrender_vello v0.11.0 (available: v0.12.0)
+      Adding cargo-platform v0.3.1 (available: v0.3.3)
+      Adding cocoa v0.24.1 (available: v0.26.1)
+      Adding core-foundation v0.9.4 (available: v0.10.1)
+      Adding generic-array v0.14.7 (available: v0.14.9)
+      Adding image v0.25.6 (available: v0.25.10)
+      Adding keyboard-types v0.6.2 (available: v0.8.3)
+      Adding nix v0.22.3 (available: v0.31.3)
+      Adding plist v1.8.0 (available: v1.10.0)
+      Adding pollster v0.4.0 (available: v1.0.1)
+      Adding smol_str v0.3.2 (available: v0.3.6)
+      Adding syn v1.0.109 (available: v3.0.2)
+      Adding sysinfo v0.39.6 (requires Rust 1.95)
+      Adding taffy v0.11.0-experimental-cache-fix.3 (available: v0.11.0)
+      Adding time v0.3.45 (available: v0.3.54, requires Rust 1.88.0)
+      Adding time-core v0.1.7 (available: v0.1.9, requires Rust 1.88.0)
+      Adding time-macros v0.2.25 (available: v0.2.32, requires Rust 1.88.0)
+      Adding uuid v0.8.2 (available: v1.24.0)
+      Adding wgpu v29.0.4 (available: v30.0.0)
+      Adding wgpu_context v0.6.0 (available: v0.7.0)
+      Adding x11rb v0.13.2 (available: v0.14.0)
+ Downloading crates ...
+  Downloaded audioadapter-sample v4.0.0
+  Downloaded anyhow v1.0.104
+  Downloaded audio-core v0.2.1
+  Downloaded cfg_aliases v0.2.2
+  Downloaded audioadapter v4.0.0
+  Downloaded bytemuck_derive v1.11.0
+  Downloaded bit-set v0.10.0
+  Downloaded http-body v1.1.0
+  Downloaded serde_repr v0.1.21
+  Downloaded pollster v1.0.1
+  Downloaded futures-sink v0.3.33
+  Downloaded ecolor v0.35.0
+  Downloaded enumset v1.1.14
+  Downloaded async-trait v0.1.91
+  Downloaded futures-macro v0.3.33
+  Downloaded fastrand v2.5.0
+  Downloaded audioadapter-buffers v4.0.0
+  Downloaded accesskit_macos v0.26.3
+  Downloaded futures-io v0.3.33
+  Downloaded wgpu-core-deps-apple v30.0.0
+  Downloaded wgpu-core-deps-windows-linux-android v30.0.0
+  Downloaded thread_local v1.1.10
+  Downloaded sha1 v0.10.7
+  Downloaded time-core v0.1.7
+  Downloaded wgpu-naga-bridge v30.0.0
+  Downloaded wgpu-core-deps-emscripten v30.0.0
+  Downloaded futures-core v0.3.33
+  Downloaded thiserror v2.0.19
+  Downloaded toml_writer v1.1.2+spec-1.1.0
+  Downloaded self_cell v1.3.0
+  Downloaded quote v1.0.47
+  Downloaded egui_glow v0.35.0
+  Downloaded emath v0.35.0
+  Downloaded clap_derive v4.6.3
+  Downloaded accesskit_consumer v0.38.0
+  Downloaded time-macros v0.2.25
+  Downloaded futures-executor v0.3.33
+  Downloaded futures-channel v0.3.33
+  Downloaded thiserror-impl v2.0.19
+  Downloaded naga-types v30.0.0
+  Downloaded futures-task v0.3.33
+  Downloaded http-body-util v0.1.4
+  Downloaded reflink-copy v0.1.30
+  Downloaded zmij v1.0.23
+  Downloaded ringbuf v0.5.1
+  Downloaded open v5.4.0
+  Downloaded bitflags v2.13.1
+  Downloaded jni-min-helper v0.3.3
+  Downloaded egui-baseview v0.6.0
+  Downloaded proc-macro2 v1.0.107
+  Downloaded uuid v1.24.0
+  Downloaded socket2 v0.6.5
+  Downloaded futures v0.3.33
+  Downloaded toml v1.1.3+spec-1.1.0
+  Downloaded toml_edit v0.25.13+spec-1.1.0
+  Downloaded serde v1.0.229
+  Downloaded borsh v1.8.0
+  Downloaded cc v1.3.0
+  Downloaded iced_baseview v0.4.0
+  Downloaded tinyvec v1.12.0
+  Downloaded serde_derive v1.0.229
+  Downloaded zerocopy-derive v0.8.55
+  Downloaded epaint v0.35.0
+  Downloaded rand v0.9.5
+  Downloaded pixels v0.17.2
+  Downloaded mio v1.2.2
+  Downloaded wgpu-types v30.0.0
+  Downloaded serde_json v1.0.151
+  Downloaded winnow v1.0.4
+  Downloaded hyper v1.11.0
+  Downloaded wgpu v30.0.0
+  Downloaded time v0.3.45
+  Downloaded swash v0.2.10
+  Downloaded zerocopy v0.8.55
+  Downloaded harfrust v0.7.0
+  Downloaded wuff v0.2.8
+  Downloaded syn v3.0.2
+  Downloaded syn v2.0.119
+  Downloaded skrifa v0.44.0
+  Downloaded wgpu-core v30.0.0
+  Downloaded simd_cesu8 v1.2.0
+  Downloaded egui v0.35.0
+  Downloaded wgpu-hal v30.0.0
+  Downloaded portable-atomic v1.14.0
+  Downloaded futures-util v0.3.33
+  Downloaded font-types v0.12.1
+  Downloaded glow v0.18.0
+  Downloaded clap_builder v4.6.2
+  Downloaded serde_core v1.0.229
+  Downloaded baseview v0.2.2
+  Downloaded read-fonts v0.41.0
+  Downloaded fixed-resample v0.12.1
+  Downloaded clap v4.6.3
+  Downloaded bytemuck v1.25.2
+  Downloaded epaint_default_fonts v0.35.0
+  Downloaded tokio v1.53.1
+  Downloaded naga v30.0.0

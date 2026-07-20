@@ -4,6 +4,7 @@ mod util;
 mod context;
 mod descriptor;
 pub mod features;
+mod reaper_embed;
 mod wrapper;
 
 use crate::wrapper::clap::features::ClapFeature;
