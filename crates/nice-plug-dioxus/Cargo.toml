@@ -28,12 +28,12 @@ nice-plug-core = { path = "../nice-plug-core", version = "0.2.0" }
 
 # Use dioxus-native from blitz repo which includes all the rendering + re-exports dioxus core.
 # Pinned to a specific blitz commit for reproducibility — bump `rev` to update upstream.
-dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", rev = "727dab0105fb42659f76f7862040b82f4e982893", features = ["prelude"] }
+dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62", features = ["prelude"] }
 
 # Blitz crates from git for latest CSS support
-blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "727dab0105fb42659f76f7862040b82f4e982893" }
-blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git", rev = "727dab0105fb42659f76f7862040b82f4e982893" }
-blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "727dab0105fb42659f76f7862040b82f4e982893" }
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
+blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
 
 # Rendering — matched to blitz @ 9ebd23a's workspace versions (anyrender 0.10 /
 # anyrender_vello 0.10 / vello 0.9 / wgpu 29 / wgpu_context 0.6 /

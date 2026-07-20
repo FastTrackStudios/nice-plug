@@ -120,8 +120,8 @@ struct BaseviewShellProvider {
 }
 
 impl ShellProvider for BaseviewShellProvider {
-    fn set_cursor(&self, icon: CursorIcon) {
-        *self.cursor.lock().unwrap() = Some(icon);
+    fn set_cursor(&self, icon: Option<CursorIcon>) {
+        *self.cursor.lock().unwrap() = Some(icon.unwrap_or(CursorIcon::Default));
     }
 }
 
