@@ -9,6 +9,8 @@ use std::sync::Arc;
 
 /// Holds the WGPU instance, device, queue, and surface configuration.
 pub struct WgpuState {
+    // Held so the instance outlives the surface created from it.
+    #[allow(dead_code)]
     pub instance: wgpu::Instance,
     pub surface: wgpu::Surface<'static>,
     pub device: Arc<wgpu::Device>,
@@ -366,6 +368,7 @@ impl WgpuState {
 }
 
 /// Wrapper to provide raw-window-handle 0.6 traits from raw handles.
+#[allow(dead_code)]
 struct RawHandleWrapper {
     window: RawWindowHandle,
     display: RawDisplayHandle,
