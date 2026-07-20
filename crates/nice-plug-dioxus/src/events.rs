@@ -88,6 +88,7 @@ fn translate_mouse_event(
                 mods: convert_modifiers(*mods),
                 details: PointerDetails::default(),
                 element: Default::default(),
+                active_pointers: Default::default(),
             }))
         }
         MouseEvent::ButtonPressed {
@@ -105,6 +106,7 @@ fn translate_mouse_event(
                 mods: convert_modifiers(*mods),
                 details: PointerDetails::default(),
                 element: Default::default(),
+                active_pointers: Default::default(),
             }))
         }
         MouseEvent::ButtonReleased {
@@ -122,6 +124,7 @@ fn translate_mouse_event(
                 mods: convert_modifiers(*mods),
                 details: PointerDetails::default(),
                 element: Default::default(),
+                active_pointers: Default::default(),
             }))
         }
         MouseEvent::WheelScrolled {
@@ -137,6 +140,7 @@ fn translate_mouse_event(
                 coords: pointer_coords(mouse_pos.0, mouse_pos.1),
                 buttons: *mouse_buttons,
                 mods: convert_modifiers(*mods),
+                element: Default::default(),
             }))
         }
         MouseEvent::CursorEntered => None,
