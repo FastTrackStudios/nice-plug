@@ -10,6 +10,7 @@ members = [
   "crates/xtask",
   "crates/nice-plug-egui",
   "crates/nice-plug-iced",
+  "crates/nice-plug-dioxus",
 
   "examples/byo_gui_gl",
   "examples/byo_gui_softbuffer",

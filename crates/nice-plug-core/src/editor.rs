@@ -1,5 +1,7 @@
 //! Traits for working with plugin editors.
 
+pub mod embedded;
+
 use bitflags::bitflags;
 use dpi::{LogicalSize, PhysicalSize, Size};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -8,6 +10,10 @@ use std::ffi::{c_ulong, c_void};
 use std::num::{NonZeroIsize, NonZeroU32};
 use std::ptr::NonNull;
 
+// Re-export embedded editor types so they're reachable as `nice_plug_core::editor::*`.
+pub use embedded::{
+    EmbedBitmap, EmbedContext, EmbedDrawInfo, EmbedMouseEvent, EmbedSizeHints, EmbeddedEditor,
+};
 pub use dpi;
 
 use crate::context::gui::GuiContext;

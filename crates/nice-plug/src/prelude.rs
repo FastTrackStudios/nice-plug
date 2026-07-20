@@ -20,13 +20,16 @@ pub use crate::buffer::Buffer;
 pub use crate::context::PluginApi;
 pub use crate::context::activate::ActivateContext;
 #[cfg(feature = "editor")]
-pub use crate::context::gui::{AsyncExecutor, GuiContextInner, ParamSetter};
+pub use crate::context::gui::{AsyncExecutor, GuiContextInner, ParamSetter, TrackInfo};
 pub use crate::context::process::{ProcessContext, Transport};
 pub use crate::context::remote_controls::{
     RemoteControlsContext, RemoteControlsPage, RemoteControlsSection,
 };
 #[cfg(feature = "editor")]
-pub use crate::editor::{Editor, Modifiers, ParentWindowHandle, ResizeHint, VirtualKeyCode};
+pub use crate::editor::{
+    EmbedBitmap, EmbedContext, EmbedDrawInfo, EmbedMouseEvent, EmbedSizeHints, EmbeddedEditor,
+    Editor, Modifiers, ParentWindowHandle, ResizeHint, VirtualKeyCode,
+};
 pub use crate::midi::sysex::SysExMessage;
 pub use crate::midi::{MidiConfig, NoteEvent, PluginNoteEvent, control_change};
 pub use crate::params::Params;
@@ -36,7 +39,7 @@ pub use crate::params::range::{FloatRange, IntRange};
 pub use crate::params::smoothing::{AtomicF32, Smoothable, Smoother, SmoothingStyle};
 pub use crate::params::{BoolParam, FloatParam, IntParam, Param, ParamFlags};
 pub use crate::plugin::PluginState;
-pub use crate::plugin::{Plugin, ProcessStatus, TaskExecutor, TrackColor, TrackInfo};
+pub use crate::plugin::{Plugin, ProcessStatus, TaskExecutor, TrackColor, TrackInfo as PluginTrackInfo};
 pub use crate::wrapper::clap::features::ClapFeature;
 pub use crate::wrapper::clap::{ClapPlugin, PolyModulationConfig};
 #[cfg(feature = "vst3")]
