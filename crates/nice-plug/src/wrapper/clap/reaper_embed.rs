@@ -21,8 +21,7 @@ use crate::prelude::{
 };
 
 /// The extension ID for REAPER's embedded UI CLAP extension.
-pub const CLAP_EXT_REAPER_EMBED_UI: &CStr =
-    unsafe { c"cockos.reaper_embedui" };
+pub const CLAP_EXT_REAPER_EMBED_UI: &CStr = c"cockos.reaper_embedui";
 
 /// REAPER FX embed message constants (from reaper_plugin_fx_embed.h)
 pub mod embed_msg {
@@ -140,6 +139,7 @@ impl RawEmbedDrawInfo {
 
 impl RawEmbedSizeHints {
     /// Fill from high-level EmbedSizeHints.
+    #[allow(clippy::wrong_self_convention)] // fills self in place, CLAP style
     pub fn from_size_hints(&mut self, hints: &EmbedSizeHints) {
         // Convert aspect ratio to 16.16 fixed point (65536 = 1:1)
         self.preferred_aspect = if hints.preferred_aspect > 0.0 {

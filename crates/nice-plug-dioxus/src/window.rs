@@ -219,6 +219,7 @@ pub struct DioxusWindowHandler {
     display_handle: Option<RawDisplayHandle>,
 }
 
+#[allow(dead_code)] // constructor + timing kept for the standalone shell
 impl DioxusWindowHandler {
     /// Create a new window handler.
     ///

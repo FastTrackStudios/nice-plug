@@ -28,12 +28,12 @@ nice-plug-core = { path = "../nice-plug-core", version = "0.2.0" }
 
 # Use dioxus-native from blitz repo which includes all the rendering + re-exports dioxus core.
 # Pinned to a specific blitz commit for reproducibility — bump `rev` to update upstream.
-dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62", features = ["prelude"] }
+dioxus-native = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc", features = ["prelude"] }
 
 # Blitz crates from git for latest CSS support
-blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
-blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
-blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
+blitz-dom = "=0.3.0-beta.1"
+blitz-paint = "=0.3.0-beta.1"
+blitz-traits = "=0.3.0-beta.1"
 
 # Rendering — matched to blitz @ 9ebd23a's workspace versions (anyrender 0.10 /
 # anyrender_vello 0.10 / vello 0.9 / wgpu 29 / wgpu_context 0.6 /
@@ -67,7 +67,7 @@ raw-window-handle = "0.6"
 x11-dl = "2"
 
 # Hot reload
-dioxus-devtools = { version = "0.7", optional = true }
+dioxus-devtools = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc", optional = true }
 
 # Utilities
 crossbeam = "0.8"
