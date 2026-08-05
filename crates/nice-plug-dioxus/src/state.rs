@@ -1,6 +1,7 @@
 //! Editor state management for Dioxus editors.
 
 use crossbeam::atomic::AtomicCell;
+use nice_plug_core::editor::ResizeHint;
 use nice_plug_core::params::persist::PersistentField;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -65,6 +66,15 @@ pub struct DioxusState {
     /// back to the host (avoiding feedback loop).
     #[serde(skip)]
     pending_host_resize: AtomicCell<Option<(u32, u32)>>,
+
+    /// Whether (and how) the host may resize this editor.
+    ///
+    /// Drives CLAP's `gui.can_resize` / VST3's `canResize` and bounds every
+    /// host-driven resize. Defaults to [`ResizeHint::NON_RESIZABLE`] so an
+    /// editor keeps its fixed-size behavior until it opts in with
+    /// [`DioxusState::with_resize_hint`].
+    #[serde(skip)]
+    resize_hint: ResizeHint,
 }
 
 fn empty_size_fn() -> Box<dyn Fn() -> (u32, u32) + Send + Sync> {
@@ -103,6 +113,7 @@ impl DioxusState {
             open: AtomicBool::new(false),
             pending_resize: AtomicCell::new(None),
             pending_host_resize: AtomicCell::new(None),
+            resize_hint: ResizeHint::default(),
         })
     }
 
@@ -121,7 +132,42 @@ impl DioxusState {
             open: AtomicBool::new(false),
             pending_resize: AtomicCell::new(None),
             pending_host_resize: AtomicCell::new(None),
+            resize_hint: ResizeHint::default(),
         })
+    }
+
+    /// Declare that the host may resize this editor, and within what bounds.
+    ///
+    /// Without this the editor is fixed-size: the host greys out its resize
+    /// handle and `set_size` is refused. Consumes and returns the `Arc` so it
+    /// chains onto the constructors:
+    ///
+    /// ```ignore
+    /// DioxusState::new(|| (800, 600)).with_resize_hint(ResizeHint::RESIZABLE)
+    /// ```
+    pub fn with_resize_hint(self: Arc<Self>, resize_hint: ResizeHint) -> Arc<Self> {
+        // The hint is set once at construction, before the state is shared with
+        // the editor, so mutating through the Arc here is sound only while it is
+        // still unique. Rebuild instead of mutating so this is safe regardless.
+        let (w, h) = (self.width.load(), self.height.load());
+        Arc::new(Self {
+            default_size_fn: Box::new({
+                let (dw, dh) = (self.default_size_fn)();
+                move || (dw, dh)
+            }),
+            width: AtomicCell::new(w),
+            height: AtomicCell::new(h),
+            scale_factor: AtomicCell::new(self.scale_factor.load()),
+            open: AtomicBool::new(self.open.load(Ordering::Relaxed)),
+            pending_resize: AtomicCell::new(None),
+            pending_host_resize: AtomicCell::new(None),
+            resize_hint,
+        })
+    }
+
+    /// The editor's declared resize policy.
+    pub fn resize_hint(&self) -> ResizeHint {
+        self.resize_hint
     }
 
     /// Returns the current window size in logical pixels.

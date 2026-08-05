@@ -6,12 +6,14 @@ use crate::window::DioxusWindowHandler;
 #[cfg(feature = "softbuffer-blit")]
 use crate::window_softbuffer::DioxusSoftbufferWindowHandler;
 use crate::SharedState;
-use baseview::{Size, WindowHandle, WindowOpenOptions, WindowScalePolicy};
 use crossbeam::atomic::AtomicCell;
 use dioxus_native::prelude::Element;
 use nice_plug_core::context::gui::GuiContext;
-use nice_plug_core::editor::{Editor, ParentWindowHandle};
-use std::any::Any;
+use nice_plug_core::editor::dpi::{LogicalSize, PhysicalSize};
+use nice_plug_core::editor::{
+    Editor, EditorHandle, EditorWindow, ParentWindowHandle, ResizeHint,
+};
+use std::error::Error;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -64,74 +66,204 @@ impl DioxusEditor {
 }
 
 impl Editor for DioxusEditor {
+    type Handle = DioxusEditorHandle;
+
     fn spawn(
         &self,
-        parent: ParentWindowHandle,
-        context: Arc<dyn GuiContext>,
-    ) -> Box<dyn Any> {
+        parent: Option<ParentWindowHandle>,
+        wait_for_parent: bool,
+        suggested_scale_factor: Option<f64>,
+        gui_context: GuiContext,
+        host: Option<Box<dyn nice_plug_core::editor::HostCallbacks>>,
+    ) -> Result<EditorWindow<Self::Handle>, Box<dyn Error>> {
         let (width, height) = self.state.inner_logical_size();
         let scaling_factor = self.scaling_factor.load();
 
         let app = self.app;
-        let gui_context = context.clone();
         let dioxus_state = self.state.clone();
         let needs_redraw = self.needs_redraw.clone();
         let shared_state = self.shared_state.clone();
 
-        let window = baseview::Window::open_parented(
-            &RwhAdapter(parent),
-            WindowOpenOptions {
-                title: String::from("Plugin Editor"),
-                size: Size::new(width as f64, height as f64),
-                scale: scaling_factor
-                    .map(|f| WindowScalePolicy::ScaleFactor(f as f64))
-                    .unwrap_or(WindowScalePolicy::SystemScaleFactor),
-            },
-            move |window| {
+        // `nice-plug-core` mirrors `baseview::host::HostCallbacks` rather than
+        // depending on baseview directly (baseview has no stable release yet),
+        // so bridge the two. This is the channel a resize request travels: the
+        // editor asks its baseview window to resize, baseview asks the host
+        // through here, and the DAW resizes the plugin view.
+        struct HostAdapter {
+            host: Box<dyn nice_plug_core::editor::HostCallbacks>,
+        }
+        impl baseview::host::HostCallbacks for HostAdapter {
+            fn request_resize(
+                &mut self,
+                new_size: baseview::WindowSize,
+            ) -> Result<(), baseview::HandlerError> {
+                self.host
+                    .request_resize(new_size.physical.into(), new_size.scale_factor)
+                    .map_err(baseview::HandlerError::from_boxed)
+            }
+
+            fn destroyed(&mut self) {
+                self.host.destroyed();
+            }
+        }
+        let host = host.map(|host| baseview::host::Host::new().with_callbacks(HostAdapter { host }));
+
+        // `with_parent` borrows the adapter, so it has to outlive the builder.
+        let parent_adapter = parent.map(RwhAdapter);
+        let mut settings = baseview::WindowSettings::new()
+            .with_title("Plugin Editor")
+            .with_size(baseview::dpi::LogicalSize::new(width as f64, height as f64))
+            .with_wait_for_parent(wait_for_parent)
+            .with_fallback_scale_factor(scaling_factor.map(|f| f as f64));
+        if let Some(parent_adapter) = parent_adapter.as_ref() {
+            settings = settings.with_parent(parent_adapter);
+        }
+
+        let window = baseview::Window::create_with_host(
+            settings,
+            move |window_context| {
                 #[cfg(feature = "softbuffer-blit")]
                 {
                     DioxusSoftbufferWindowHandler::new_with_state(
-                        window,
+                        window_context,
                         app,
-                        gui_context.clone(),
-                        dioxus_state.clone(),
-                        needs_redraw.clone(),
+                        gui_context,
+                        dioxus_state,
+                        needs_redraw,
                         shared_state,
                     )
                 }
                 #[cfg(not(feature = "softbuffer-blit"))]
                 {
                     DioxusWindowHandler::new_with_state(
-                        window,
+                        window_context,
                         app,
-                        gui_context.clone(),
-                        dioxus_state.clone(),
-                        needs_redraw.clone(),
+                        gui_context,
+                        dioxus_state,
+                        needs_redraw,
                         shared_state,
                     )
                 }
             },
-        );
+            host,
+        )?;
+
+        if let Some(scale_factor) = suggested_scale_factor {
+            window.suggest_fallback_scale_factor(scale_factor)?;
+        }
 
         self.state.set_open(true);
-        Box::new(DioxusEditorHandle {
-            state: self.state.clone(),
+
+        Ok(EditorWindow {
+            handle: DioxusEditorHandle {
+                state: self.state.clone(),
+                needs_redraw: self.needs_redraw.clone(),
+            },
             window,
         })
     }
 
-    fn size(&self) -> nice_plug_core::editor::dpi::Size {
+    fn size(&self) -> PhysicalSize<u32> {
         let (width, height) = self.state.scaled_logical_size();
-        nice_plug_core::editor::dpi::LogicalSize::new(width, height).into()
+        let scale = self.scaling_factor.load().unwrap_or(1.0) as f64;
+        LogicalSize::new(width as f64, height as f64).to_physical(scale)
     }
 
-    fn set_scale_factor(&self, factor: f64) -> bool {
-        // Don't allow scale factor changes while the editor is open
-        if self.state.is_open() {
+    fn resize_hint(&self) -> ResizeHint {
+        self.state.resize_hint()
+    }
+}
+
+/// Handle to a spawned [`DioxusEditor`].
+///
+/// Owns nothing window-shaped: baseview 0.3 hands the window back separately in
+/// [`EditorWindow`] and closes it when that is dropped, so this only carries the
+/// shared state the host-facing callbacks need.
+pub struct DioxusEditorHandle {
+    state: Arc<DioxusState>,
+    needs_redraw: Arc<AtomicBool>,
+}
+
+// The handle itself holds only `Arc`s of `Sync` state; baseview's window is
+// tracked separately and is what carries the raw pointers.
+unsafe impl Send for DioxusEditorHandle {}
+
+impl EditorHandle for DioxusEditorHandle {
+    type Window = baseview::Window;
+    type Error = baseview::Error;
+
+    fn run_until_closed(window: Self::Window) -> Result<(), Self::Error> {
+        window.run_until_closed()
+    }
+
+    fn set_parent(
+        &self,
+        parent: ParentWindowHandle,
+        window: &Self::Window,
+    ) -> Result<(), Self::Error> {
+        window.set_parent(&RwhAdapter(parent))
+    }
+
+    fn show(&self, window: &Self::Window) -> Result<(), Self::Error> {
+        window.show()
+    }
+
+    fn hide(&self, window: &Self::Window) -> Result<(), Self::Error> {
+        window.hide()
+    }
+
+    /// The host resized the plugin view — either because it accepted an earlier
+    /// `request_resize`, or because the user dragged its resize handle.
+    ///
+    /// Records the new size on [`DioxusState`] as a *host* resize so the window
+    /// handler reconfigures the surface and relayouts blitz without asking the
+    /// host to resize again (that would loop), then resizes the child window to
+    /// match.
+    fn set_size(&self, new_size: PhysicalSize<u32>, window: &Self::Window) -> bool {
+        let current = window.size();
+        if !self.state.resize_hint().is_size_valid(
+            new_size,
+            current.physical,
+            current.scale_factor,
+        ) {
             return false;
         }
-        self.scaling_factor.store(Some(factor as f32));
+
+        let logical: LogicalSize<f64> = new_size.to_logical(current.scale_factor);
+        self.state
+            .host_set_size(logical.width as u32, logical.height as u32);
+
+        if let Err(e) = window.resize(new_size) {
+            nice_plug_core::nice_error!("Failed to resize editor window to {new_size:?}: {e}");
+            return false;
+        }
+        self.needs_redraw.store(true, Ordering::Relaxed);
         true
+    }
+
+    fn adjust_size(
+        &self,
+        new_size: PhysicalSize<u32>,
+        window: &Self::Window,
+    ) -> Option<PhysicalSize<u32>> {
+        let current = window.size();
+        Some(self.state.resize_hint().adjust_size(
+            new_size,
+            current.physical,
+            current.scale_factor,
+        ))
+    }
+
+    fn set_suggested_scale_factor(
+        &self,
+        scale_factor: f64,
+        window: &Self::Window,
+    ) -> Result<(), Self::Error> {
+        window.suggest_fallback_scale_factor(scale_factor)
+    }
+
+    fn state_changed(&self) {
+        self.needs_redraw.store(true, Ordering::Relaxed);
     }
 
     fn param_value_changed(&self, _id: &str, _normalized_value: f32) {
@@ -141,25 +273,11 @@ impl Editor for DioxusEditor {
     fn param_modulation_changed(&self, _id: &str, _modulation_offset: f32) {
         self.needs_redraw.store(true, Ordering::Relaxed);
     }
-
-    fn param_values_changed(&self) {
-        self.needs_redraw.store(true, Ordering::Relaxed);
-    }
 }
-
-/// Handle returned from `Editor::spawn()` that closes the window when dropped.
-struct DioxusEditorHandle {
-    state: Arc<DioxusState>,
-    window: WindowHandle,
-}
-
-// The window handle contains raw pointers
-unsafe impl Send for DioxusEditorHandle {}
 
 impl Drop for DioxusEditorHandle {
     fn drop(&mut self) {
         self.state.set_open(false);
-        self.window.close();
     }
 }
 

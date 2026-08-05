@@ -22,7 +22,7 @@ use crossbeam::channel::{unbounded, Receiver, Sender};
 use dioxus_native::prelude::*;
 use dioxus_native::DioxusDocument;
 use futures_util::task::ArcWake;
-use nice_plug_core::context::gui::GuiContext;
+use nice_plug_core::context::gui::{GuiContext, GuiContextInner};
 
 use crate::events::Modifiers;
 use std::num::NonZeroU32;
@@ -110,7 +110,7 @@ pub struct DioxusSoftbufferWindowHandler {
     renderer: Option<Renderer>,
 
     // nice-plug integration
-    gui_context: Arc<dyn GuiContext>,
+    gui_context: GuiContext,
     dioxus_state: Arc<DioxusState>,
     needs_redraw: Arc<AtomicBool>,
 
@@ -141,7 +141,7 @@ impl DioxusSoftbufferWindowHandler {
     pub fn new(
         _window: &mut Window,
         app: fn() -> Element,
-        gui_context: Arc<dyn GuiContext>,
+        gui_context: GuiContext,
         dioxus_state: Arc<DioxusState>,
         needs_redraw: Arc<AtomicBool>,
     ) -> Self {
@@ -152,7 +152,7 @@ impl DioxusSoftbufferWindowHandler {
     pub fn new_with_state(
         _window: &mut Window,
         app: fn() -> Element,
-        gui_context: Arc<dyn GuiContext>,
+        gui_context: GuiContext,
         dioxus_state: Arc<DioxusState>,
         needs_redraw: Arc<AtomicBool>,
         shared_state: Option<SharedState>,

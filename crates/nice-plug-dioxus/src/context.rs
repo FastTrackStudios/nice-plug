@@ -37,13 +37,13 @@ use std::sync::Arc;
 /// ```
 #[derive(Clone)]
 pub struct ParamContext {
-    gui_context: Arc<dyn GuiContext>,
+    gui_context: GuiContext,
     needs_redraw: Arc<AtomicBool>,
 }
 
 impl ParamContext {
     /// Create a new parameter context.
-    pub fn new(gui_context: Arc<dyn GuiContext>, needs_redraw: Arc<AtomicBool>) -> Self {
+    pub fn new(gui_context: GuiContext, needs_redraw: Arc<AtomicBool>) -> Self {
         Self {
             gui_context,
             needs_redraw,
@@ -118,7 +118,7 @@ impl ParamContext {
     /// Get the underlying GUI context for advanced operations.
     ///
     /// This is primarily useful for saving/restoring plugin state.
-    pub fn gui_context(&self) -> &Arc<dyn GuiContext> {
+    pub fn gui_context(&self) -> &GuiContext {
         &self.gui_context
     }
 

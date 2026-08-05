@@ -21,7 +21,7 @@ use crossbeam::channel::unbounded;
 use dioxus_native::prelude::*;
 use dioxus_native::DioxusDocument;
 use futures_util::task::ArcWake;
-use nice_plug_core::context::gui::GuiContext;
+use nice_plug_core::context::gui::{GuiContext, GuiContextInner};
 use nice_plug_core::context::PluginApi;
 use nice_plug_core::params::internals::ParamPtr;
 use nice_plug_core::plugin::PluginState;
@@ -38,7 +38,7 @@ use vello::{
 /// Parameter automation and state are not available outside a DAW.
 struct StandaloneGuiContext;
 
-impl GuiContext for StandaloneGuiContext {
+impl GuiContextInner for StandaloneGuiContext {
     fn plugin_api(&self) -> PluginApi {
         PluginApi::Clap
     }
@@ -87,7 +87,7 @@ pub fn open_standalone_with_state(
     shared_state: Option<SharedState>,
 ) {
     let dioxus_state = DioxusState::new(move || (width, height));
-    let gui_context: Arc<dyn GuiContext> = Arc::new(StandaloneGuiContext);
+    let gui_context: Arc<dyn GuiContextInner> = Arc::new(StandaloneGuiContext);
     let needs_redraw = Arc::new(AtomicBool::new(true));
 
     Window::open_blocking(
@@ -135,7 +135,7 @@ pub fn open_standalone_with_state(
 /// Vello overlays (spectrum, waveform) will be invisible because `OverlayRegistry` is
 /// not connected to the blitz-shell render loop. All CSS-based UI renders normally.
 pub fn launch_native_app(app: fn() -> Element, shared_state: Option<crate::SharedState>) {
-    let gui_context: std::sync::Arc<dyn GuiContext> = std::sync::Arc::new(StandaloneGuiContext);
+    let gui_context: std::sync::Arc<dyn GuiContextInner> = std::sync::Arc::new(StandaloneGuiContext);
     let needs_redraw = std::sync::Arc::new(AtomicBool::new(true));
     let param_ctx = ParamContext::new(gui_context, needs_redraw);
 
@@ -198,7 +198,7 @@ pub fn open_parented_x11(
     }
 
     let dioxus_state = DioxusState::new(move || (width, height));
-    let gui_context: Arc<dyn GuiContext> = Arc::new(StandaloneGuiContext);
+    let gui_context: Arc<dyn GuiContextInner> = Arc::new(StandaloneGuiContext);
     let needs_redraw = Arc::new(AtomicBool::new(true));
 
     Window::open_parented(
@@ -355,7 +355,7 @@ pub fn render_screenshot(
     let doc_proxy = HeadlessDocProxy { sender: doc_sender };
     let doc_proxy_rc = Rc::new(doc_proxy);
 
-    let gui_context: Arc<dyn GuiContext> = Arc::new(StandaloneGuiContext);
+    let gui_context: Arc<dyn GuiContextInner> = Arc::new(StandaloneGuiContext);
     let needs_redraw = Arc::new(AtomicBool::new(false));
     let param_context = ParamContext::new(gui_context, needs_redraw);
     let dioxus_state = DioxusState::new(move || (width, height));

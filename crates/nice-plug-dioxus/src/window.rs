@@ -26,7 +26,7 @@ use cursor_icon::CursorIcon;
 use dioxus_native::prelude::*;
 use dioxus_native::DioxusDocument;
 use futures_util::task::ArcWake;
-use nice_plug_core::context::gui::GuiContext;
+use nice_plug_core::context::gui::{GuiContext, GuiContextInner};
 
 // Use Modifiers from our events module which handles the version conflict
 use crate::events::Modifiers;
@@ -173,7 +173,7 @@ pub struct DioxusWindowHandler {
     renderer: Option<Renderer>,
 
     // nice-plug integration
-    gui_context: Arc<dyn GuiContext>,
+    gui_context: GuiContext,
     dioxus_state: Arc<DioxusState>,
     needs_redraw: Arc<AtomicBool>,
 
@@ -228,7 +228,7 @@ impl DioxusWindowHandler {
     pub fn new(
         window: &mut Window,
         app: fn() -> Element,
-        gui_context: Arc<dyn GuiContext>,
+        gui_context: GuiContext,
         dioxus_state: Arc<DioxusState>,
         needs_redraw: Arc<AtomicBool>,
     ) -> Self {
@@ -242,7 +242,7 @@ impl DioxusWindowHandler {
     pub fn new_with_state(
         window: &mut Window,
         app: fn() -> Element,
-        gui_context: Arc<dyn GuiContext>,
+        gui_context: GuiContext,
         dioxus_state: Arc<DioxusState>,
         needs_redraw: Arc<AtomicBool>,
         shared_state: Option<SharedState>,
