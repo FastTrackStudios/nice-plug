@@ -177,7 +177,7 @@ pub mod embedded;
 pub mod widgets;
 
 // Internal modules
-mod editor;
+pub mod editor;
 mod events;
 #[cfg(feature = "hot-reload")]
 mod hot_reload;
@@ -232,6 +232,7 @@ pub mod prelude {
     pub use crate::context::{use_param, use_param_context, use_param_normalized, ParamContext};
     pub use crate::create_dioxus_editor;
     pub use crate::create_dioxus_editor_with_state;
+    pub use crate::editor::{DioxusEditor, DioxusEditorHandle};
     pub use crate::custom_paint::{
         use_scene_overlay, use_scene_overlay_background, use_scene_overlay_on_layer, vello,
         OverlayHandle, OverlayLayer, OverlayRegistry, SceneOverlay,
