@@ -69,7 +69,7 @@ use crossbeam::channel::{self, SendTimeoutError};
 use crossbeam::queue::ArrayQueue;
 use nice_plug_core::audio_setup::{AudioIOLayout, AuxiliaryBuffers, BufferConfig, ProcessMode};
 #[cfg(feature = "editor")]
-use nice_plug_core::context::gui::{GuiContextInner, TrackInfo};
+use nice_plug_core::context::gui::{GuiContext, TrackInfo};
 use nice_plug_core::context::process::Transport;
 #[cfg(feature = "editor")]
 use nice_plug_core::editor::{Editor, EditorWindow, EmbeddedEditor};

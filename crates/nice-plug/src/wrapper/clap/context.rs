@@ -266,17 +266,25 @@ impl<P: ClapPlugin> nice_plug_core::context::gui::GuiContextInner for WrapperGui
     }
 
     fn rescan_param_info(&self) {
-        let task_posted = self.wrapper.schedule_gui(Task::RescanParamInfo);
+        let task_posted = self
+            .wrapper
+            .upgrade()
+            .unwrap()
+            .schedule_gui(Task::RescanParamInfo);
         crate::nice_debug_assert!(task_posted, "Task queue full, param info rescan not sent");
     }
 
     fn rescan_param_all(&self) {
-        let task_posted = self.wrapper.schedule_gui(Task::RescanParamAll);
+        let task_posted = self
+            .wrapper
+            .upgrade()
+            .unwrap()
+            .schedule_gui(Task::RescanParamAll);
         crate::nice_debug_assert!(task_posted, "Task queue full, param rescan-all not sent");
     }
 
     fn track_info(&self) -> Option<nice_plug_core::context::gui::TrackInfo> {
-        self.wrapper.current_track_info()
+        self.wrapper.upgrade().unwrap().current_track_info()
     }
 }
 
