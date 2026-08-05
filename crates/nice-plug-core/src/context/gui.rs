@@ -108,6 +108,36 @@ impl GuiContext {
     pub fn set_state(&self, state: PluginState) {
         self.inner.set_state(state);
     }
+
+    // ── FTS fork additions ──────────────────────────────────────────────
+    // Forwarders for the extra `GuiContextInner` methods the fork adds, so
+    // they are reachable through the `GuiContext` value editors are handed.
+
+    /// Ask the host to re-read every parameter's *metadata* (name, range,
+    /// flags, value-to-string) without touching the values themselves.
+    ///
+    /// Used when a parameter's presentation changes at runtime — e.g. a mode
+    /// switch that relabels a knob.
+    pub fn rescan_param_info(&self) {
+        self.inner.rescan_param_info();
+    }
+
+    /// Ask the host to re-read every parameter's metadata *and* value.
+    ///
+    /// The heavier counterpart to [`rescan_param_info`][Self::rescan_param_info];
+    /// use it after wholesale changes such as loading a preset.
+    pub fn rescan_param_all(&self) {
+        self.inner.rescan_param_all();
+    }
+
+    /// Information about the track this plugin instance sits on (name, color,
+    /// channel count, bus flags), when the host provides it.
+    ///
+    /// Backed by CLAP's `track-info/1`. Returns `None` on hosts that don't
+    /// support it.
+    pub fn track_info(&self) -> Option<TrackInfo> {
+        self.inner.track_info()
+    }
 }
 
 /// Callbacks the plugin can make when the user interacts with its GUI such as updating parameter

@@ -30,7 +30,7 @@ pub struct GainEditor {
 
     params: Arc<GainParams>,
     peak_meter: Arc<AtomicF32>,
-    track_info: Arc<Mutex<TrackInfo>>,
+    track_info: Arc<Mutex<PluginTrackInfo>>,
 
     // For some reason, softbuffer doesn't show anything on the first paint.
     /// A message channel to send events between the GUI and the audio thread.
@@ -305,7 +305,7 @@ pub struct Gain {
     initial_editor: Option<GainEditor>,
 
     /// Track information reported by the host through [`Plugin::track_info_updated()`].
-    track_info: Arc<Mutex<TrackInfo>>,
+    track_info: Arc<Mutex<PluginTrackInfo>>,
 }
 
 impl Default for Gain {
@@ -318,7 +318,7 @@ impl Default for Gain {
 
         let params = Arc::new(GainParams::default());
         let peak_meter = Arc::new(AtomicF32::new(util::MINUS_INFINITY_DB));
-        let track_info = Arc::new(std::sync::Mutex::new(TrackInfo::default()));
+        let track_info = Arc::new(std::sync::Mutex::new(PluginTrackInfo::default()));
 
         let initial_editor = GainEditor {
             open_state: None,
@@ -523,7 +523,7 @@ impl Plugin for Gain {
         ProcessStatus::Normal
     }
 
-    fn track_info_updated(&mut self, info: TrackInfo) {
+    fn track_info_updated(&mut self, info: PluginTrackInfo) {
         if let Ok(mut track_info) = self.track_info.lock() {
             *track_info = info;
         }

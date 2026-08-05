@@ -13,7 +13,8 @@ use crate::custom_paint::OverlayRegistry;
 use crate::state::DioxusState;
 use crate::SharedState;
 use anyrender_vello::VelloScenePainter;
-use baseview::{Size, Window, WindowOpenOptions, WindowScalePolicy};
+use baseview::dpi::LogicalSize;
+use baseview::{Window, WindowSettings};
 use blitz_dom::{Document as _, DocumentConfig};
 use blitz_paint::paint_scene;
 use blitz_traits::shell::{ColorScheme, Viewport};
@@ -41,10 +42,6 @@ struct StandaloneGuiContext;
 impl GuiContextInner for StandaloneGuiContext {
     fn plugin_api(&self) -> PluginApi {
         PluginApi::Clap
-    }
-
-    fn request_resize(&self) -> bool {
-        true
     }
 
     unsafe fn raw_begin_set_parameter(&self, _param: ParamPtr) {}
@@ -87,16 +84,16 @@ pub fn open_standalone_with_state(
     shared_state: Option<SharedState>,
 ) {
     let dioxus_state = DioxusState::new(move || (width, height));
-    let gui_context: Arc<dyn GuiContextInner> = Arc::new(StandaloneGuiContext);
+    let gui_context = GuiContext::new(Arc::new(StandaloneGuiContext));
     let needs_redraw = Arc::new(AtomicBool::new(true));
 
-    Window::open_blocking(
-        WindowOpenOptions {
-            title: String::from("FTS GUI Test (Native wgpu Surface)"),
-            size: Size::new(width as f64, height as f64),
-            scale: WindowScalePolicy::ScaleFactor(1.0),
-        },
+    let window = Window::create(
+        WindowSettings::new()
+            .with_title("FTS GUI Test (Native wgpu Surface)")
+            .with_size(LogicalSize::new(width as f64, height as f64))
+            .with_fallback_scale_factor(1.0),
         move |window| {
+            Ok({
             // Use the native wgpu surface handler (not softbuffer)
             #[cfg(not(feature = "softbuffer-blit"))]
             {
@@ -120,8 +117,16 @@ pub fn open_standalone_with_state(
                     shared_state,
                 )
             }
+            })
         },
-    );
+    )
+    .expect("failed to create standalone window");
+
+    // No host here: the standalone window owns its own event loop and blocks
+    // until it is closed.
+    if let Err(e) = window.run_until_closed() {
+        nice_plug_core::nice_error!("Standalone window exited with an error: {e}");
+    }
 }
 
 /// Launch a Dioxus native desktop app via the standard `dioxus_native::launch_cfg` path
@@ -135,7 +140,7 @@ pub fn open_standalone_with_state(
 /// Vello overlays (spectrum, waveform) will be invisible because `OverlayRegistry` is
 /// not connected to the blitz-shell render loop. All CSS-based UI renders normally.
 pub fn launch_native_app(app: fn() -> Element, shared_state: Option<crate::SharedState>) {
-    let gui_context: std::sync::Arc<dyn GuiContextInner> = std::sync::Arc::new(StandaloneGuiContext);
+    let gui_context = GuiContext::new(std::sync::Arc::new(StandaloneGuiContext));
     let needs_redraw = std::sync::Arc::new(AtomicBool::new(true));
     let param_ctx = ParamContext::new(gui_context, needs_redraw);
 
@@ -167,7 +172,7 @@ pub fn open_parented_x11(
     parent_window_id: u32,
     width: u32,
     height: u32,
-) -> baseview::WindowHandle {
+) -> baseview::Window {
     use crate::window::DioxusWindowHandler;
     use raw_window_handle::{
         HandleError, HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
@@ -198,27 +203,27 @@ pub fn open_parented_x11(
     }
 
     let dioxus_state = DioxusState::new(move || (width, height));
-    let gui_context: Arc<dyn GuiContextInner> = Arc::new(StandaloneGuiContext);
+    let gui_context = GuiContext::new(Arc::new(StandaloneGuiContext));
     let needs_redraw = Arc::new(AtomicBool::new(true));
 
-    Window::open_parented(
-        &X11Parent(parent_window_id),
-        WindowOpenOptions {
-            title: String::from("Plugin Editor (Parented Test)"),
-            size: Size::new(width as f64, height as f64),
-            scale: WindowScalePolicy::ScaleFactor(1.0),
-        },
+    Window::create(
+        WindowSettings::new()
+            .with_title("Plugin Editor (Parented Test)")
+            .with_size(LogicalSize::new(width as f64, height as f64))
+            .with_fallback_scale_factor(1.0)
+            .with_parent(&X11Parent(parent_window_id)),
         move |window| {
-            DioxusWindowHandler::new_with_state(
+            Ok(DioxusWindowHandler::new_with_state(
                 window,
                 app,
                 gui_context.clone(),
                 dioxus_state.clone(),
                 needs_redraw.clone(),
                 None,
-            )
+            ))
         },
     )
+    .expect("failed to create parented window")
 }
 
 /// Document proxy for headless rendering (same as in window.rs).
@@ -355,7 +360,7 @@ pub fn render_screenshot(
     let doc_proxy = HeadlessDocProxy { sender: doc_sender };
     let doc_proxy_rc = Rc::new(doc_proxy);
 
-    let gui_context: Arc<dyn GuiContextInner> = Arc::new(StandaloneGuiContext);
+    let gui_context = GuiContext::new(Arc::new(StandaloneGuiContext));
     let needs_redraw = Arc::new(AtomicBool::new(false));
     let param_context = ParamContext::new(gui_context, needs_redraw);
     let dioxus_state = DioxusState::new(move || (width, height));

@@ -45,8 +45,9 @@ pub fn translate_event(
         }
         Event::Window(WindowEvent::Focused) => None,
         Event::Window(WindowEvent::Unfocused) => None,
-        Event::Window(WindowEvent::Resized(_)) => None, // Handled separately
         Event::Window(WindowEvent::WillClose) => None,
+        // `Event` / `WindowEvent` are #[non_exhaustive] in baseview 0.3.
+        _ => None,
     }
 }
 
@@ -150,6 +151,8 @@ fn translate_mouse_event(
         MouseEvent::DragMoved { .. } => None,
         MouseEvent::DragLeft => None,
         MouseEvent::DragDropped { .. } => None,
+        // `MouseEvent` is #[non_exhaustive] in baseview 0.3.
+        _ => None,
     }
 }
 
@@ -204,6 +207,8 @@ fn translate_mouse_button(button: MouseButton) -> MouseEventButton {
         MouseButton::Back => MouseEventButton::Fourth,
         MouseButton::Forward => MouseEventButton::Fifth,
         MouseButton::Other(_) => MouseEventButton::Main,
+        // `MouseButton` is #[non_exhaustive] in baseview 0.3.
+        _ => MouseEventButton::Main,
     }
 }
 

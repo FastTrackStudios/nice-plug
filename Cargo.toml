@@ -9,7 +9,11 @@ members = [
   "crates/cargo-nice-plug",
   "crates/xtask",
   "crates/nice-plug-egui",
-  "crates/nice-plug-iced",
+  # FTS fork delta: upstream's baseview-03 branch ported the egui backend but
+  # left the iced one on the pre-rework `Editor` trait, so it does not build.
+  # FTS ships the dioxus backend and has no way to test iced — excluded rather
+  # than carrying a speculative port. Restore when upstream ports it.
+  #"crates/nice-plug-iced",
   "crates/nice-plug-dioxus",
 
   "examples/byo_gui_gl",
@@ -17,7 +21,7 @@ members = [
   "examples/byo_gui_wgpu",
   "examples/gain",
   "examples/gain_egui",
-  "examples/gain_iced",
+  #"examples/gain_iced",  # see nice-plug-iced above
   #"examples/iced_audio_widget", // TODO: Add this back when nice-plug-core 0.2 is published
   "examples/midi_inverter",
   "examples/poly_mod_synth",

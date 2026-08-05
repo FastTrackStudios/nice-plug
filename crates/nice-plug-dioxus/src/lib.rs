@@ -69,7 +69,6 @@ use std::any::Any;
 use std::sync::Arc;
 
 use dioxus_native::prelude::Element;
-use nice_plug_core::editor::Editor;
 
 // Re-export dioxus_native for convenience
 pub use dioxus_native;
@@ -284,8 +283,8 @@ pub mod prelude {
 pub fn create_dioxus_editor(
     state: Arc<DioxusState>,
     app: fn() -> Element,
-) -> Option<Box<dyn Editor>> {
-    Some(Box::new(editor::DioxusEditor::new(state, app)))
+) -> Option<editor::DioxusEditor> {
+    Some(editor::DioxusEditor::new(state, app))
 }
 
 /// Create a Dioxus-based editor with shared state for a nice-plug plugin.
@@ -334,9 +333,7 @@ pub fn create_dioxus_editor_with_state<T: std::any::Any + Send + Sync + 'static>
     state: Arc<DioxusState>,
     shared_state: Arc<T>,
     app: fn() -> Element,
-) -> Option<Box<dyn Editor>> {
+) -> Option<editor::DioxusEditor> {
     let wrapped = SharedState::new(shared_state);
-    Some(Box::new(editor::DioxusEditor::new_with_state(
-        state, wrapped, app,
-    )))
+    Some(editor::DioxusEditor::new_with_state(state, wrapped, app))
 }

@@ -124,25 +124,25 @@ impl Editor for DioxusEditor {
             move |window_context| {
                 #[cfg(feature = "softbuffer-blit")]
                 {
-                    DioxusSoftbufferWindowHandler::new_with_state(
+                    Ok(DioxusSoftbufferWindowHandler::new_with_state(
                         window_context,
                         app,
                         gui_context,
                         dioxus_state,
                         needs_redraw,
                         shared_state,
-                    )
+                    ))
                 }
                 #[cfg(not(feature = "softbuffer-blit"))]
                 {
-                    DioxusWindowHandler::new_with_state(
+                    Ok(DioxusWindowHandler::new_with_state(
                         window_context,
                         app,
                         gui_context,
                         dioxus_state,
                         needs_redraw,
                         shared_state,
-                    )
+                    ))
                 }
             },
             host,
@@ -294,8 +294,7 @@ impl raw_window_handle::HasWindowHandle for RwhAdapter {
         &self,
     ) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
         use raw_window_handle::RawWindowHandle;
-        use std::num::{NonZeroIsize, NonZeroU32};
-        use std::ptr::NonNull;
+        use std::num::NonZeroU32;
 
         let raw = match self.0 {
             ParentWindowHandle::XlibWindow(window) => {

@@ -17,7 +17,9 @@ use crate::SharedState;
 #[cfg(feature = "hot-reload")]
 use crate::hot_reload::HotReloadState;
 
-use baseview::{Event, EventStatus, MouseCursor, Window, WindowHandler};
+use baseview::{Event, EventStatus, HandlerError, MouseCursor, WindowContext, WindowHandler};
+use baseview::dpi::LogicalSize;
+use std::cell::RefCell;
 use blitz_dom::{Document as _, DocumentConfig};
 use blitz_traits::events::MouseEventButtons;
 use blitz_traits::shell::{ColorScheme, ShellProvider, Viewport};
@@ -26,7 +28,7 @@ use cursor_icon::CursorIcon;
 use dioxus_native::prelude::*;
 use dioxus_native::DioxusDocument;
 use futures_util::task::ArcWake;
-use nice_plug_core::context::gui::{GuiContext, GuiContextInner};
+use nice_plug_core::context::gui::GuiContext;
 
 // Use Modifiers from our events module which handles the version conflict
 use crate::events::Modifiers;
@@ -162,7 +164,18 @@ fn cursor_icon_to_baseview(icon: CursorIcon) -> MouseCursor {
 }
 
 /// The baseview window handler for Dioxus editors using standard wgpu surface.
+///
+/// baseview 0.3 calls its handler through `&self` and no longer passes a
+/// `&mut Window` in, so the mutable render/input state lives in a `RefCell` and
+/// the window is captured once at construction. [`HandlerState`] holds that
+/// state and keeps the original `&mut self` method bodies; this type is the
+/// `&self` shell baseview actually drives.
 pub struct DioxusWindowHandler {
+    state: RefCell<HandlerState>,
+    window: WindowContext,
+}
+
+struct HandlerState {
     // Dioxus state
     dioxus_doc: Option<DioxusDocument>,
     app: fn() -> Element,
@@ -224,9 +237,9 @@ impl DioxusWindowHandler {
     /// Create a new window handler.
     ///
     /// The `app` function must be a function pointer (not a closure) because
-    /// VirtualDom::new requires `fn() -> Element`.
+    /// `VirtualDom::new` requires `fn() -> Element`.
     pub fn new(
-        window: &mut Window,
+        window: WindowContext,
         app: fn() -> Element,
         gui_context: GuiContext,
         dioxus_state: Arc<DioxusState>,
@@ -240,7 +253,44 @@ impl DioxusWindowHandler {
     /// The shared state will be injected into the Dioxus context and available
     /// via `use_context::<SharedState>()` in components.
     pub fn new_with_state(
-        window: &mut Window,
+        window: WindowContext,
+        app: fn() -> Element,
+        gui_context: GuiContext,
+        dioxus_state: Arc<DioxusState>,
+        needs_redraw: Arc<AtomicBool>,
+        shared_state: Option<SharedState>,
+    ) -> Self {
+        let state =
+            HandlerState::new_with_state(&window, app, gui_context, dioxus_state, needs_redraw, shared_state);
+        Self {
+            state: RefCell::new(state),
+            window,
+        }
+    }
+}
+
+#[allow(dead_code)]
+impl HandlerState {
+    /// Create a new window handler.
+    ///
+    /// The `app` function must be a function pointer (not a closure) because
+    /// VirtualDom::new requires `fn() -> Element`.
+    fn new(
+        window: &WindowContext,
+        app: fn() -> Element,
+        gui_context: GuiContext,
+        dioxus_state: Arc<DioxusState>,
+        needs_redraw: Arc<AtomicBool>,
+    ) -> Self {
+        Self::new_with_state(window, app, gui_context, dioxus_state, needs_redraw, None)
+    }
+
+    /// Create a new window handler with shared state.
+    ///
+    /// The shared state will be injected into the Dioxus context and available
+    /// via `use_context::<SharedState>()` in components.
+    fn new_with_state(
+        window: &WindowContext,
         app: fn() -> Element,
         gui_context: GuiContext,
         dioxus_state: Arc<DioxusState>,
@@ -461,8 +511,8 @@ impl DioxusWindowHandler {
     }
 }
 
-impl WindowHandler for DioxusWindowHandler {
-    fn on_frame(&mut self, window: &mut Window) {
+impl HandlerState {
+    fn on_frame(&mut self, window: &WindowContext) {
         // Initialize after receiving the first resize event (which gives us the actual scale factor)
         // On macOS with SystemScaleFactor, we need to wait for this to get the HiDPI scale
         if self.wgpu_state.is_none() {
@@ -502,18 +552,27 @@ impl WindowHandler for DioxusWindowHandler {
                     new_logical_height
                 );
             } else {
-                // Request the window resize (async — X11 will send ConfigureNotify)
-                window.resize(baseview::Size::new(
+                // Ask for the resize. Under baseview 0.3 this is the whole
+                // plugin-driven path: baseview forwards the request to the host
+                // through `HostCallbacks::request_resize` (wired up in
+                // `editor.rs`), and the granted size comes back as a `resized()`
+                // callback. There is no separate `GuiContext::request_resize`
+                // to call any more — doing both is what used to cause resize
+                // feedback loops.
+                if let Err(e) = window.resize(LogicalSize::new(
                     new_logical_width as f64,
                     new_logical_height as f64,
-                ));
-
-                // Store logical size for persistence / host query
-                self.dioxus_state
-                    .set_size(new_logical_width, new_logical_height);
-
-                // Notify the host that the window size changed
-                self.gui_context.request_resize();
+                )) {
+                    nice_plug_core::nice_warn!(
+                        "[RESIZE] Host refused {}x{}: {e}",
+                        new_logical_width,
+                        new_logical_height
+                    );
+                } else {
+                    // Store logical size for persistence / host query.
+                    self.dioxus_state
+                        .set_size(new_logical_width, new_logical_height);
+                }
             }
         }
 
@@ -524,11 +583,15 @@ impl WindowHandler for DioxusWindowHandler {
             let new_physical_width = (new_logical_width as f32 * self.scale_factor) as u32;
             let new_physical_height = (new_logical_height as f32 * self.scale_factor) as u32;
 
-            // Resize the baseview window (needed for the child NSView to match)
-            window.resize(baseview::Size::new(
+            // Resize the baseview window (needed for the child NSView to match).
+            // This one is host-driven, so a failure is only worth logging — the
+            // host already owns the size it told us about.
+            if let Err(e) = window.resize(LogicalSize::new(
                 new_logical_width as f64,
                 new_logical_height as f64,
-            ));
+            )) {
+                nice_plug_core::nice_warn!("[RESIZE] Host-driven resize failed: {e}");
+            }
 
             self.width = new_physical_width;
             self.height = new_physical_height;
@@ -683,60 +746,62 @@ impl WindowHandler for DioxusWindowHandler {
 
         // Apply any cursor change requested by blitz (e.g. hovering over a button)
         if let Some(icon) = self.pending_cursor.lock().unwrap().take() {
-            window.set_mouse_cursor(cursor_icon_to_baseview(icon));
+            let _ = window.set_mouse_cursor(cursor_icon_to_baseview(icon));
         }
 
         // Reset redraw flag
         self.needs_redraw.store(false, Ordering::Relaxed);
     }
 
-    fn on_event(&mut self, _window: &mut Window, event: Event) -> EventStatus {
-        if let Event::Window(baseview::WindowEvent::Resized(info)) = &event {
-            // Use PHYSICAL size for wgpu and Blitz viewport
-            let physical_size = info.physical_size();
-            self.width = physical_size.width;
-            self.height = physical_size.height;
-            self.scale_factor = info.scale() as f32;
-            self.received_resize = true;
+    /// The window was resized — by the host, or by our own `resize()` request
+    /// being granted.
+    ///
+    /// In baseview 0.3 this is a handler method rather than a `WindowEvent`, so
+    /// it is the single place the physical size, the Blitz viewport, and the
+    /// wgpu surface are kept in step.
+    fn resized(&mut self, new_size: baseview::WindowSize) {
+        // PHYSICAL size drives wgpu and the Blitz viewport.
+        self.width = new_size.physical.width;
+        self.height = new_size.physical.height;
+        self.scale_factor = new_size.scale_factor as f32;
+        self.received_resize = true;
 
-            nice_plug_core::nice_log!(
-                "[RESIZE EVENT] physical: {}x{}, logical: {}x{}, scale: {}",
+        nice_plug_core::nice_log!(
+            "[RESIZE] physical: {}x{}, logical: {}x{}, scale: {}",
+            self.width,
+            self.height,
+            new_size.logical.width,
+            new_size.logical.height,
+            self.scale_factor
+        );
+
+        // LOGICAL size is what gets persisted.
+        let logical_w = new_size.logical.width as u32;
+        let logical_h = new_size.logical.height as u32;
+        self.dioxus_state.set_size(logical_w, logical_h);
+
+        // Let overlay components re-query their rects.
+        if let Some(mut sig) = self.window_size_signal {
+            sig.set((logical_w, logical_h));
+        }
+
+        if let Some(doc) = &mut self.dioxus_doc {
+            doc.inner_mut().set_viewport(Viewport::new(
                 self.width,
                 self.height,
-                info.logical_size().width,
-                info.logical_size().height,
-                self.scale_factor
-            );
-
-            // Update the stored size in DioxusState (for persistence) using logical size
-            let logical_size = info.logical_size();
-            let logical_w = logical_size.width as u32;
-            let logical_h = logical_size.height as u32;
-            self.dioxus_state.set_size(logical_w, logical_h);
-
-            // Update reactive window size signal so overlay components re-query their rects
-            if let Some(mut sig) = self.window_size_signal {
-                sig.set((logical_w, logical_h));
-            }
-
-            // Update viewport with PHYSICAL size (this is how Blitz expects it)
-            if let Some(doc) = &mut self.dioxus_doc {
-                doc.inner_mut().set_viewport(Viewport::new(
-                    self.width,
-                    self.height,
-                    self.scale_factor,
-                    ColorScheme::Light,
-                ));
-            }
-
-            // Resize wgpu surface with physical size
-            if let Some(wgpu_state) = &mut self.wgpu_state {
-                wgpu_state.resize(self.width, self.height);
-            }
-
-            self.needs_redraw.store(true, Ordering::Relaxed);
-            return EventStatus::Captured;
+                self.scale_factor,
+                ColorScheme::Light,
+            ));
         }
+
+        if let Some(wgpu_state) = &mut self.wgpu_state {
+            wgpu_state.resize(self.width, self.height);
+        }
+
+        self.needs_redraw.store(true, Ordering::Relaxed);
+    }
+
+    fn on_event(&mut self, _window: &WindowContext, event: Event) -> EventStatus {
 
         // Translate and dispatch event to Dioxus
         if let Some(doc) = &mut self.dioxus_doc {
@@ -844,18 +909,49 @@ impl WindowHandler for DioxusWindowHandler {
 /// Waker that sets a flag to trigger a redraw.
 struct RedrawWaker(Arc<AtomicBool>);
 
+/// baseview 0.3 drives the handler through `&self`, so every entry point takes
+/// the state out of the `RefCell` and hands the captured window to the real
+/// implementation on [`HandlerState`].
+///
+/// Re-entrancy is the one hazard: a borrow that is still live when baseview
+/// calls back in would panic. `try_borrow_mut` degrades to skipping the call
+/// instead — a dropped frame or event is recoverable, a panic across the FFI
+/// boundary is not.
+impl WindowHandler for DioxusWindowHandler {
+    fn on_frame(&self) -> Result<(), HandlerError> {
+        if let Ok(mut state) = self.state.try_borrow_mut() {
+            state.on_frame(&self.window);
+        }
+        Ok(())
+    }
+
+    fn resized(&self, new_size: baseview::WindowSize) -> Result<(), HandlerError> {
+        if let Ok(mut state) = self.state.try_borrow_mut() {
+            state.resized(new_size);
+        }
+        Ok(())
+    }
+
+    fn on_event(&self, event: Event) -> EventStatus {
+        match self.state.try_borrow_mut() {
+            Ok(mut state) => state.on_event(&self.window, event),
+            Err(_) => EventStatus::Ignored,
+        }
+    }
+}
+
 impl ArcWake for RedrawWaker {
     fn wake_by_ref(arc_self: &Arc<Self>) {
         arc_self.0.store(true, Ordering::Relaxed);
     }
 }
 
-/// Get raw window handles from baseview Window using raw-window-handle 0.6 API.
+/// Get raw window handles from a baseview [`WindowContext`].
 ///
-/// Our forked baseview uses raw-window-handle 0.6 directly, so we can just use
-/// the HasWindowHandle and HasDisplayHandle traits.
+/// baseview 0.3 implements the raw-window-handle 0.6 traits on `WindowContext`
+/// directly, which is what wgpu and softbuffer want.
 fn get_raw_handles_from_baseview(
-    window: &Window,
+    window: &WindowContext,
 ) -> (Option<RawWindowHandle>, Option<RawDisplayHandle>) {
     use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
