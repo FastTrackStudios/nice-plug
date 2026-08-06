@@ -33,6 +33,30 @@ pub struct EditorWindow<E: EditorHandle> {
     pub window: E::Window,
 }
 
+/// Lets the window thread ask for time on the main thread.
+///
+/// X11 windows run on their own thread, so a callback the window wants to make
+/// *to the host* — a resize request, most importantly — cannot be made from
+/// there: hosts require their GUI calls on the main thread. baseview therefore
+/// queues those callbacks and hands them over only when
+/// [`EditorHandle::poll_host_callbacks()`] is called on the main thread. This
+/// is the other half: the window thread uses it to ask the host for a
+/// main-thread callback in which that poll can happen.
+///
+/// Without one, plugin-driven resizes are enqueued on Linux and never
+/// delivered — the child window changes size and the host's frame does not.
+/// Windows and macOS keep their windows on the main thread already, so there
+/// it is unused.
+///
+/// (This mirrors
+/// [`baseview::host::HostMainThreadCaller`](https://docs.rs/baseview/latest/baseview/host/trait.HostMainThreadCaller.html),
+/// for the same reason [`HostCallbacks`] does.)
+pub trait HostMainThreadCaller: Send + 'static {
+    /// Ask the host to call back on the main thread. The wrapper is expected to
+    /// call [`EditorHandle::poll_host_callbacks()`] when it does.
+    fn call_main_thread(&mut self);
+}
+
 /// A handler for baseview windows to interact with their host.
 ///
 /// (This is a re-implementation of
@@ -58,6 +82,17 @@ pub trait HostCallbacks: 'static {
     /// The host should close its parent window, as it will not show anything useful
     /// anymore.
     fn destroyed(&mut self);
+
+    /// How the window thread can ask for main-thread time, if this wrapper can
+    /// provide it. See [`HostMainThreadCaller`].
+    ///
+    /// Returning `None` — the default — means callbacks made from the window
+    /// thread are never delivered, which on X11 is every plugin-driven resize.
+    /// A wrapper with a way to schedule main-thread work (CLAP's
+    /// `host.request_callback`, for one) should override this.
+    fn main_thread_caller(&self) -> Option<Box<dyn HostMainThreadCaller>> {
+        None
+    }
 }
 
 /// A handle to spawned instance of an [`Editor`].
@@ -179,6 +214,17 @@ pub trait EditorHandle: Send + 'static {
         let _ = is_down;
         let _ = modifiers;
         false
+    }
+
+    /// Deliver any callbacks the window thread queued for the host.
+    ///
+    /// Call this from the main thread whenever the host grants a callback in
+    /// response to [`HostMainThreadCaller::call_main_thread()`]. It is a no-op
+    /// on platforms that keep the window on the main thread.
+    ///
+    /// This is what makes a plugin-driven resize reach the host on X11.
+    fn poll_host_callbacks(&self, window: &mut Self::Window) {
+        let _ = window;
     }
 
     /// Called when the plugin's state has changed (i.e. a preset was loaded). The

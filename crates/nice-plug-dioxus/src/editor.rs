@@ -106,7 +106,28 @@ impl Editor for DioxusEditor {
                 self.host.destroyed();
             }
         }
-        let host = host.map(|host| baseview::host::Host::new().with_callbacks(HostAdapter { host }));
+        // The window thread's route to main-thread time. On X11 baseview parks
+        // host callbacks until someone polls them from the main thread, and
+        // nothing polls them unless the host is asked for a callback — so
+        // without this a plugin-driven resize resizes the child window and the
+        // DAW's frame never moves.
+        struct MainThreadAdapter {
+            caller: Box<dyn nice_plug_core::editor::HostMainThreadCaller>,
+        }
+        impl baseview::host::HostMainThreadCaller for MainThreadAdapter {
+            fn call_main_thread(&mut self) {
+                self.caller.call_main_thread();
+            }
+        }
+
+        let host = host.map(|host| {
+            let main_thread = host.main_thread_caller();
+            let host = baseview::host::Host::new().with_callbacks(HostAdapter { host });
+            match main_thread {
+                Some(caller) => host.with_main_thread(MainThreadAdapter { caller }),
+                None => host,
+            }
+        });
 
         // `with_parent` borrows the adapter, so it has to outlive the builder.
         let parent_adapter = parent.map(RwhAdapter);
@@ -206,6 +227,16 @@ impl EditorHandle for DioxusEditorHandle {
 
     fn show(&self, window: &Self::Window) -> Result<(), Self::Error> {
         window.show()
+    }
+
+    /// Hand the window thread's queued host callbacks to the host.
+    ///
+    /// A no-op everywhere but X11, where it is the last link in the resize
+    /// chain: editor asks its window to resize → baseview queues a host
+    /// callback → the wrapper asks the host for main-thread time → this runs
+    /// the callback → the DAW resizes the plugin view.
+    fn poll_host_callbacks(&self, window: &mut Self::Window) {
+        window.host_main_thread_callback();
     }
 
     fn hide(&self, window: &Self::Window) -> Result<(), Self::Error> {

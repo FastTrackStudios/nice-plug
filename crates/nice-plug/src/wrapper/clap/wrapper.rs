@@ -2668,6 +2668,22 @@ impl<P: ClapPlugin> Wrapper<P> {
         while let Some(task) = wrapper.tasks.pop() {
             wrapper.execute(task, true);
         }
+
+        // The editor's window thread also asks for main-thread callbacks (see
+        // `ClapMainThreadCaller`), and this is where they get delivered. On X11
+        // this is what carries a plugin-driven resize request to the host; on
+        // the other platforms it is a no-op.
+        #[cfg(feature = "editor")]
+        {
+            use nice_plug_core::editor::EditorHandle;
+
+            if let Some(editor_window) = wrapper.editor_window.borrow_mut().as_mut() {
+                let editor_window = editor_window.get_mut();
+                editor_window
+                    .handle
+                    .poll_host_callbacks(&mut editor_window.window);
+            }
+        }
     }
 
     unsafe extern "C" fn ext_audio_ports_config_count(plugin: *const clap_plugin) -> u32 {
@@ -2968,7 +2984,7 @@ impl<P: ClapPlugin> Wrapper<P> {
             if wrapper.editor_window.borrow().is_none() {
                 use std::error::Error;
 
-                use nice_plug_core::editor::{HostCallbacks, dpi::Size};
+                use nice_plug_core::editor::{HostCallbacks, HostMainThreadCaller, dpi::Size};
 
                 #[derive(Debug, thiserror::Error)]
                 enum ResizeError {
@@ -3019,6 +3035,38 @@ impl<P: ClapPlugin> Wrapper<P> {
                                     true,
                                 )
                             }
+                        }
+                    }
+
+                    fn main_thread_caller(&self) -> Option<Box<dyn HostMainThreadCaller>> {
+                        Some(Box::new(ClapMainThreadCaller::<P> {
+                            wrapper: self.wrapper.clone(),
+                        }))
+                    }
+                }
+
+                /// Asks the host for a main-thread callback on the window
+                /// thread's behalf — `clap_host::request_callback`, the same
+                /// mechanism `schedule_gui` uses. `on_main_thread` then polls
+                /// the editor's queued host callbacks.
+                ///
+                /// Only X11 needs this, and it is the difference between a
+                /// plugin-driven resize reaching the DAW and being silently
+                /// dropped.
+                struct ClapMainThreadCaller<P: ClapPlugin> {
+                    wrapper: Weak<Wrapper<P>>,
+                }
+
+                // Only the weak wrapper handle crosses threads here, and
+                // `request_callback` is documented thread-safe: it exists so
+                // other threads can ask for main-thread time.
+                unsafe impl<P: ClapPlugin> Send for ClapMainThreadCaller<P> {}
+
+                impl<P: ClapPlugin> HostMainThreadCaller for ClapMainThreadCaller<P> {
+                    fn call_main_thread(&mut self) {
+                        if let Some(wrapper) = self.wrapper.upgrade() {
+                            let host = &wrapper.host_callback;
+                            unsafe_clap_call! { host=>request_callback(&**host) };
                         }
                     }
                 }
