@@ -618,6 +618,15 @@ impl HandlerState {
             self.needs_redraw.store(true, Ordering::Relaxed);
         }
 
+        // The host has just parented or mapped the window: reconfigure the
+        // surface and redraw, which is what a manual resize was doing for us.
+        if self.dioxus_state.take_revalidate() {
+            if let Some(wgpu_state) = &mut self.wgpu_state {
+                wgpu_state.resize(self.width, self.height);
+            }
+            self.needs_redraw.store(true, Ordering::Relaxed);
+        }
+
         // Measure time since last frame (gap between on_frame calls)
         let t_gap = self.last_frame_start.elapsed().as_millis();
         self.last_frame_start = Instant::now();

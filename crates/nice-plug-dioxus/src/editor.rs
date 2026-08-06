@@ -195,6 +195,13 @@ impl Editor for DioxusEditor {
     }
 }
 
+/// How many frames to re-present for after the host moves or maps the window.
+///
+/// A tenth of a second at 60fps: long enough to cover a host that maps its
+/// frame a few frames after parenting, short enough that nobody can measure
+/// the cost.
+const REVALIDATE_FRAMES: u32 = 6;
+
 /// Handle to a spawned [`DioxusEditor`].
 ///
 /// Owns nothing window-shaped: baseview 0.3 hands the window back separately in
@@ -222,10 +229,17 @@ impl EditorHandle for DioxusEditorHandle {
         parent: ParentWindowHandle,
         window: &Self::Window,
     ) -> Result<(), Self::Error> {
-        window.set_parent(&RwhAdapter(parent))
+        let result = window.set_parent(&RwhAdapter(parent));
+        // The window just moved into the host's frame — see
+        // `DioxusState::revalidate`.
+        self.state.revalidate(REVALIDATE_FRAMES);
+        result
     }
 
     fn show(&self, window: &Self::Window) -> Result<(), Self::Error> {
+        // And the host is about to map it, which is the other half of the same
+        // problem — see `DioxusState::revalidate`.
+        self.state.revalidate(REVALIDATE_FRAMES);
         window.show()
     }
 

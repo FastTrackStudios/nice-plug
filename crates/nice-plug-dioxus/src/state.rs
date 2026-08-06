@@ -66,6 +66,11 @@ pub struct DioxusState {
     /// back to the host (avoiding feedback loop).
     #[serde(skip)]
     pending_host_resize: AtomicCell<Option<(u32, u32)>>,
+    /// Frames left in which to re-present the surface after the host moves the
+    /// window under us. See [`DioxusState::revalidate`]. Never persisted — it
+    /// is about this window opening, not about the plugin's state.
+    #[serde(skip)]
+    revalidate_frames: AtomicCell<u32>,
 
     /// Whether (and how) the host may resize this editor.
     ///
@@ -113,6 +118,7 @@ impl DioxusState {
             open: AtomicBool::new(false),
             pending_resize: AtomicCell::new(None),
             pending_host_resize: AtomicCell::new(None),
+            revalidate_frames: AtomicCell::new(0),
             resize_hint: ResizeHint::default(),
         })
     }
@@ -132,6 +138,7 @@ impl DioxusState {
             open: AtomicBool::new(false),
             pending_resize: AtomicCell::new(None),
             pending_host_resize: AtomicCell::new(None),
+            revalidate_frames: AtomicCell::new(0),
             resize_hint: ResizeHint::default(),
         })
     }
@@ -161,6 +168,7 @@ impl DioxusState {
             open: AtomicBool::new(self.open.load(Ordering::Relaxed)),
             pending_resize: AtomicCell::new(None),
             pending_host_resize: AtomicCell::new(None),
+            revalidate_frames: AtomicCell::new(0),
             resize_hint,
         })
     }
@@ -214,6 +222,35 @@ impl DioxusState {
     /// but does NOT call window.resize() or gui_context.request_resize().
     pub fn host_set_size(&self, width: u32, height: u32) {
         self.pending_host_resize.store(Some((width, height)));
+    }
+
+    /// Re-present the surface for the next `frames` frames.
+    ///
+    /// A plugin editor's window is not where it is drawn. It is created
+    /// standalone, the host reparents it into its own frame, and the host maps
+    /// that frame whenever it likes — possibly after the editor has already
+    /// drawn. On X11 the swapchain configured against the window before all
+    /// that does not necessarily survive it, and the symptom is an editor that
+    /// stays blank until you resize the window, because resizing is the one
+    /// thing that reconfigures the surface.
+    ///
+    /// So after `set_parent` and after `show`, spend a few frames
+    /// reconfiguring and redrawing. It costs a fraction of a second of extra
+    /// work once per editor open, and it is the difference between a plugin
+    /// that appears and one you have to shake first.
+    pub fn revalidate(&self, frames: u32) {
+        self.revalidate_frames
+            .store(frames.max(self.revalidate_frames.load()));
+    }
+
+    /// Whether this frame is one of them, consuming it if so.
+    pub fn take_revalidate(&self) -> bool {
+        let left = self.revalidate_frames.load();
+        if left == 0 {
+            return false;
+        }
+        self.revalidate_frames.store(left - 1);
+        true
     }
 
     /// Take the pending host-driven resize, if any.
