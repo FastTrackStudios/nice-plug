@@ -36,6 +36,52 @@ pub enum MidiConfig {
     MidiCCs,
 }
 
+/// A human-readable name for one key, shown in the host's piano roll in place of the default
+/// `C6`-style label.
+///
+/// Returned from [`Plugin::note_names()`][crate::plugin::Plugin::note_names]. This is what turns a
+/// drum map, a keyswitch layout or a cue track into something readable — the difference between
+/// editing `C6` and editing `Chorus`.
+///
+/// `channel` and `port` are wildcards by default, which is what you want unless the layout actually
+/// differs per channel (a multi-timbral drum map, say).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteName {
+    /// The name shown for this key. Truncated to the host's limit (CLAP allows 255 bytes); a
+    /// trailing multi-byte character is dropped rather than split.
+    pub name: String,
+    /// The key this names, 0-127.
+    pub key: u8,
+    /// The MIDI channel this applies to, or `None` for every channel.
+    pub channel: Option<u8>,
+    /// The note port this applies to, or `None` for every port.
+    pub port: Option<i16>,
+}
+
+impl NoteName {
+    /// A name applying to `key` on every channel and port.
+    pub fn new(key: u8, name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            key,
+            channel: None,
+            port: None,
+        }
+    }
+
+    /// Restrict this name to a single MIDI channel.
+    pub fn with_channel(mut self, channel: u8) -> Self {
+        self.channel = Some(channel);
+        self
+    }
+
+    /// Restrict this name to a single note port.
+    pub fn with_port(mut self, port: i16) -> Self {
+        self.port = Some(port);
+        self
+    }
+}
+
 // FIXME: Like the voice ID, channel and note number can also be omitted in CLAP. And instead of an
 //        Option, maybe this should use a dedicated type to more clearly indicate that missing
 //        values should be treated as wildcards.

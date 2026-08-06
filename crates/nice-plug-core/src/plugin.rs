@@ -12,7 +12,7 @@ use crate::{
     audio_setup::{AudioIOLayout, AuxiliaryBuffers, BufferConfig},
     buffer::Buffer,
     context::{activate::ActivateContext, process::ProcessContext},
-    midi::{MidiConfig, sysex::SysExMessage},
+    midi::{MidiConfig, NoteName, sysex::SysExMessage},
     params::Params,
 };
 
@@ -169,6 +169,33 @@ pub trait Plugin: Default + Send + 'static {
     ///
     /// Queried only once immediately after the plugin instance is created.
     fn params(&self) -> Arc<dyn Params>;
+
+    /// Human-readable names for the notes this plugin responds to, shown
+    /// in the host's piano roll instead of `C6`, `C#6`, …
+    ///
+    /// Return an empty slice (the default) to say nothing, which leaves
+    /// the host showing plain note names. Otherwise return one
+    /// [`NoteName`] per named key; unnamed keys keep their default label.
+    ///
+    /// This is what turns a drum map, a keyswitch layout, or a cue track
+    /// into something readable — the difference between editing "C6" and
+    /// editing "Chorus".
+    ///
+    /// Exposed to CLAP hosts through the `clap.note-name` extension. The
+    /// host queries this when it loads the plugin and caches the result,
+    /// so a layout that changes at runtime won't be picked up until the
+    /// host asks again — telling it to re-query needs
+    /// `clap_host_note_name::changed`, which this wrapper does not
+    /// surface yet. Static layouts, which is nearly all of them, are
+    /// fine.
+    ///
+    /// VST3 has no equivalent that REAPER reads, so this is CLAP-only.
+    ///
+    /// Called on the main thread, but keep it cheap — the host may ask
+    /// more than once.
+    fn note_names(&self) -> Vec<NoteName> {
+        Vec::new()
+    }
 
     /// Returns an extension struct for interacting with the plugin's editor, if it has one. Later
     /// the host may call [`Editor::spawn()`] to create an editor instance. To read the current

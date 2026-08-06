@@ -51,6 +51,8 @@ use clap_sys::ext::track_info::{
     CLAP_TRACK_INFO_IS_FOR_RETURN_TRACK, clap_host_track_info, clap_plugin_track_info,
     clap_track_info,
 };
+use clap_sys::ext::note_name::{CLAP_EXT_NOTE_NAME, clap_note_name, clap_plugin_note_name};
+use clap_sys::string_sizes::CLAP_NAME_SIZE;
 use clap_sys::ext::voice_info::{
     CLAP_EXT_VOICE_INFO, CLAP_VOICE_INFO_SUPPORTS_OVERLAPPING_NOTES, clap_host_voice_info,
     clap_plugin_voice_info, clap_voice_info,
@@ -73,6 +75,7 @@ use nice_plug_core::context::gui::{GuiContext, TrackInfo};
 use nice_plug_core::context::process::Transport;
 #[cfg(feature = "editor")]
 use nice_plug_core::editor::{Editor, EditorWindow, EmbeddedEditor};
+use nice_plug_core::midi::NoteName;
 use nice_plug_core::midi::sysex::SysExMessage;
 use nice_plug_core::midi::{MidiConfig, NoteEvent, PluginNoteEvent};
 use nice_plug_core::params::internals::ParamPtr;
@@ -266,6 +269,12 @@ pub struct Wrapper<P: ClapPlugin> {
     clap_plugin_remote_controls: clap_plugin_remote_controls,
     /// The plugin's remote control pages, if it defines any. Filled when initializing the plugin.
     remote_control_pages: Vec<clap_remote_controls_page>,
+
+    clap_plugin_note_name: clap_plugin_note_name,
+    /// Names for the plugin's keys, refreshed from `Plugin::note_names()` whenever the host asks
+    /// for the count. Cached because the host then asks for each entry by index and we must hand
+    /// back a stable list — re-querying per index would let the two calls disagree.
+    note_names: AtomicRefCell<Vec<NoteName>>,
 
     clap_plugin_render: clap_plugin_render,
 
@@ -751,6 +760,12 @@ impl<P: ClapPlugin> Wrapper<P> {
                 get: Some(Self::ext_remote_controls_get),
             },
             remote_control_pages,
+
+            clap_plugin_note_name: clap_plugin_note_name {
+                count: Some(Self::ext_note_name_count),
+                get: Some(Self::ext_note_name_get),
+            },
+            note_names: AtomicRefCell::new(Vec::new()),
 
             clap_plugin_render: clap_plugin_render {
                 has_hard_realtime_requirement: Some(Self::ext_render_has_hard_realtime_requirement),
@@ -2586,6 +2601,13 @@ impl<P: ClapPlugin> Wrapper<P> {
             } else {
                 std::ptr::null()
             }
+        } else if id == CLAP_EXT_NOTE_NAME {
+            // Names describe keys on a note port, so they're only meaningful when there is one.
+            if P::MIDI_INPUT >= MidiConfig::Basic || P::MIDI_OUTPUT >= MidiConfig::Basic {
+                &wrapper.clap_plugin_note_name as *const _ as *const c_void
+            } else {
+                std::ptr::null()
+            }
         } else if id == CLAP_EXT_REMOTE_CONTROLS {
             &wrapper.clap_plugin_remote_controls as *const _ as *const c_void
         } else if id == CLAP_EXT_RENDER {
@@ -3563,6 +3585,48 @@ impl<P: ClapPlugin> Wrapper<P> {
                 wrapper.handle_out_events(&*out, 0, 0);
             }
         }
+    }
+
+    /// Refresh the cached names and report how many there are.
+    ///
+    /// The host calls this before walking the list, so this is the point where the plugin's
+    /// current names are pulled in.
+    unsafe extern "C" fn ext_note_name_count(plugin: *const clap_plugin) -> u32 {
+        check_null_ptr!(0, plugin, unsafe { (*plugin).plugin_data });
+        let wrapper = unsafe { &*((*plugin).plugin_data as *const Self) };
+
+        let names = wrapper.plugin.lock().note_names();
+        let count = names.len() as u32;
+        *wrapper.note_names.borrow_mut() = names;
+
+        count
+    }
+
+    unsafe extern "C" fn ext_note_name_get(
+        plugin: *const clap_plugin,
+        index: u32,
+        note_name: *mut clap_note_name,
+    ) -> bool {
+        check_null_ptr!(false, plugin, unsafe { (*plugin).plugin_data }, note_name);
+        let wrapper = unsafe { &*((*plugin).plugin_data as *const Self) };
+
+        let names = wrapper.note_names.borrow();
+        let Some(name) = names.get(index as usize) else {
+            return false;
+        };
+
+        unsafe {
+            *note_name = clap_note_name {
+                name: [0; CLAP_NAME_SIZE],
+                // -1 is CLAP's wildcard for "every port" / "every channel".
+                port: name.port.unwrap_or(-1),
+                key: i16::from(name.key),
+                channel: name.channel.map(i16::from).unwrap_or(-1),
+            };
+            strlcpy(&mut (*note_name).name, &name.name);
+        }
+
+        true
     }
 
     unsafe extern "C" fn ext_remote_controls_count(plugin: *const clap_plugin) -> u32 {
