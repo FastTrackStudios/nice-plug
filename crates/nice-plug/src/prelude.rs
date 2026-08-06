@@ -31,7 +31,7 @@ pub use crate::editor::{
     Editor, Modifiers, ParentWindowHandle, ResizeHint, VirtualKeyCode,
 };
 pub use crate::midi::sysex::SysExMessage;
-pub use crate::midi::{MidiConfig, NoteEvent, PluginNoteEvent, control_change};
+pub use crate::midi::{MidiConfig, NoteEvent, NoteName, PluginNoteEvent, control_change};
 pub use crate::params::Params;
 pub use crate::params::enums::{Enum, EnumParam};
 pub use crate::params::internals::ParamPtr;
