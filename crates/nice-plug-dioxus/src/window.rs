@@ -513,15 +513,30 @@ impl HandlerState {
 
 impl HandlerState {
     fn on_frame(&mut self, window: &WindowContext) {
-        // Initialize after receiving the first resize event (which gives us the actual scale factor)
-        // On macOS with SystemScaleFactor, we need to wait for this to get the HiDPI scale
+        // Initialization needs the window's real physical size and scale. This
+        // used to wait for the first `resized()` callback to supply them, which
+        // works on X11 — the ConfigureNotify following window creation always
+        // delivers one — and never happens on macOS: baseview only calls
+        // `resized()` from `view_did_change_backing_properties`, and only when
+        // the size or scale actually CHANGES from what the view was created
+        // with. A freshly created editor has changed neither, so no event ever
+        // came, `received_resize` stayed false, this returned early on every
+        // frame, and wgpu was never created. That is the blank grey editor on
+        // macOS — no [INIT], no surface, nothing painted, no crash to point at.
+        //
+        // The wait was never necessary: `on_frame` is handed the WindowContext,
+        // which reports both numbers on demand. Ask it, and initialize.
         if self.wgpu_state.is_none() {
-            if self.received_resize {
-                self.initialize();
-            } else {
-                // Skip this frame, wait for resize event
-                return;
+            if !self.received_resize {
+                let size = window.size();
+                self.width = size.physical.width;
+                self.height = size.physical.height;
+                self.scale_factor = size.scale_factor as f32;
+                self.dioxus_state
+                    .set_size(size.logical.width as u32, size.logical.height as u32);
+                self.received_resize = true;
             }
+            self.initialize();
         }
 
         // Check for pending resize request from the UI (UI provides LOGICAL size).
