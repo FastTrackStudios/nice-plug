@@ -81,3 +81,17 @@ cursor-icon = "1"
 [dev-dependencies]
 # Example needs these directly
 pollster = "0.4"
+
+# macOS only: baseview never learns that a PARENT resized our view. It calls
+# `resized()` only from `view_did_change_backing_properties`, which nothing
+# invokes on an external frame change (there is no NSViewFrameDidChange
+# observer), and `WindowContext::size()` returns a cached value updated in that
+# same place. So the editor polls the live NSView each frame instead — see
+# `macos_live_geometry` in window.rs. Versions match baseview 0.3's own objc2.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "NSResponder",
+    "NSView",
+    "NSWindow",
+] }

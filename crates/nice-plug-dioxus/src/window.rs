@@ -511,7 +511,65 @@ impl HandlerState {
     }
 }
 
+/// The view's ACTUAL physical size and backing scale, read from AppKit.
+///
+/// Returns `(physical_width, physical_height, scale_factor)`.
+///
+/// baseview's cached values cannot be trusted on macOS for two reasons, and
+/// both bite in REAPER. Nothing observes `NSViewFrameDidChange`, so when the
+/// HOST resizes our view the cache is never updated and the editor keeps
+/// rendering at the old size until something else happens to refresh it — the
+/// "editor only catches up once you finish dragging" behaviour. And the scale
+/// is captured once at window creation as
+/// `parent_view.window()…unwrap_or(1.0)`, so a view parented before it belongs
+/// to a window is stuck at 1.0 forever — on a Retina display that renders the
+/// whole editor at half size.
+///
+/// Asking AppKit directly each frame sidesteps both.
+#[cfg(target_os = "macos")]
+fn macos_live_geometry(handle: &RawWindowHandle) -> Option<(u32, u32, f32)> {
+    use objc2_app_kit::NSView;
+
+    let RawWindowHandle::AppKit(appkit) = handle else {
+        return None;
+    };
+    // SAFETY: baseview owns this NSView and keeps it alive for the editor's
+    // lifetime; we only read geometry, on the main thread.
+    let view: &NSView = unsafe { appkit.ns_view.cast().as_ref() };
+    let scale = view.window().map(|w| w.backingScaleFactor()).unwrap_or(1.0);
+    let frame = view.frame();
+    let physical_w = ((frame.size.width * scale).round() as u32).max(1);
+    let physical_h = ((frame.size.height * scale).round() as u32).max(1);
+    Some((physical_w, physical_h, scale as f32))
+}
+
 impl HandlerState {
+    /// Track the view's real geometry on macOS, where no resize event comes.
+    ///
+    /// Cheap: two AppKit property reads per frame, and it only does work when
+    /// something actually changed.
+    #[cfg(target_os = "macos")]
+    fn poll_macos_geometry(&mut self) {
+        let Some(handle) = self.window_handle else {
+            return;
+        };
+        let Some((physical_w, physical_h, scale)) = macos_live_geometry(&handle) else {
+            return;
+        };
+        let changed = physical_w != self.width
+            || physical_h != self.height
+            || (scale - self.scale_factor).abs() > f32::EPSILON;
+        if !changed {
+            return;
+        }
+        let logical_w = (physical_w as f32 / scale).round() as u32;
+        let logical_h = (physical_h as f32 / scale).round() as u32;
+        self.apply_physical_size(physical_w, physical_h, scale, logical_w, logical_h);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn poll_macos_geometry(&mut self) {}
+
     fn on_frame(&mut self, window: &WindowContext) {
         // Initialization needs the window's real physical size and scale. This
         // used to wait for the first `resized()` callback to supply them, which
@@ -538,6 +596,10 @@ impl HandlerState {
             }
             self.initialize();
         }
+
+        // macOS never tells us the host resized us, and may have handed us a
+        // scale of 1.0 for a view that was not in a window yet. Ask AppKit.
+        self.poll_macos_geometry();
 
         // Check for pending resize request from the UI (UI provides LOGICAL size).
         // We only issue the resize request here — the actual width/height, viewport,
@@ -784,24 +846,45 @@ impl HandlerState {
     /// it is the single place the physical size, the Blitz viewport, and the
     /// wgpu surface are kept in step.
     fn resized(&mut self, new_size: baseview::WindowSize) {
+        self.apply_physical_size(
+            new_size.physical.width,
+            new_size.physical.height,
+            new_size.scale_factor as f32,
+            new_size.logical.width as u32,
+            new_size.logical.height as u32,
+        );
+    }
+
+    /// Adopt a new physical size and scale: wgpu surface, Blitz viewport and
+    /// the persisted logical size all move together.
+    ///
+    /// Split out of `resized` so the macOS geometry poll can drive the same
+    /// path — on that platform baseview does not report a parent-driven
+    /// resize at all, so this is the only way the editor ever hears about one.
+    fn apply_physical_size(
+        &mut self,
+        physical_w: u32,
+        physical_h: u32,
+        scale_factor: f32,
+        logical_w: u32,
+        logical_h: u32,
+    ) {
         // PHYSICAL size drives wgpu and the Blitz viewport.
-        self.width = new_size.physical.width;
-        self.height = new_size.physical.height;
-        self.scale_factor = new_size.scale_factor as f32;
+        self.width = physical_w;
+        self.height = physical_h;
+        self.scale_factor = scale_factor;
         self.received_resize = true;
 
         nice_plug_core::nice_log!(
             "[RESIZE] physical: {}x{}, logical: {}x{}, scale: {}",
             self.width,
             self.height,
-            new_size.logical.width,
-            new_size.logical.height,
+            logical_w,
+            logical_h,
             self.scale_factor
         );
 
         // LOGICAL size is what gets persisted.
-        let logical_w = new_size.logical.width as u32;
-        let logical_h = new_size.logical.height as u32;
         self.dioxus_state.set_size(logical_w, logical_h);
 
         // Let overlay components re-query their rects.
