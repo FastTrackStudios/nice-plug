@@ -217,6 +217,10 @@ struct HandlerState {
     scale_factor: f32,
     // Whether we've received a resize event with the actual scale factor
     received_resize: bool,
+    /// Frames spent waiting for the view to join a window before giving up and
+    /// initializing anyway (see `init_geometry`). Only macOS has to wait.
+    #[cfg(target_os = "macos")]
+    init_wait_frames: u32,
 
     // FPS tracking
     fps_frame_count: u32,
@@ -345,6 +349,8 @@ impl HandlerState {
             height: physical_height,
             scale_factor,
             received_resize: false,
+            #[cfg(target_os = "macos")]
+            init_wait_frames: 0,
             window_handle,
             display_handle,
             fps_frame_count: 0,
@@ -527,7 +533,17 @@ impl HandlerState {
 ///
 /// Asking AppKit directly each frame sidesteps both.
 #[cfg(target_os = "macos")]
-fn macos_live_geometry(handle: &RawWindowHandle) -> Option<(u32, u32, f32)> {
+struct MacGeometry {
+    physical_w: u32,
+    physical_h: u32,
+    scale: f32,
+    /// Whether the view actually belongs to a window yet. Until it does, the
+    /// backing scale below is a fallback, not a measurement.
+    in_window: bool,
+}
+
+#[cfg(target_os = "macos")]
+fn macos_live_geometry(handle: &RawWindowHandle) -> Option<MacGeometry> {
     use objc2_app_kit::NSView;
 
     let RawWindowHandle::AppKit(appkit) = handle else {
@@ -536,11 +552,16 @@ fn macos_live_geometry(handle: &RawWindowHandle) -> Option<(u32, u32, f32)> {
     // SAFETY: baseview owns this NSView and keeps it alive for the editor's
     // lifetime; we only read geometry, on the main thread.
     let view: &NSView = unsafe { appkit.ns_view.cast().as_ref() };
-    let scale = view.window().map(|w| w.backingScaleFactor()).unwrap_or(1.0);
+    let window = view.window();
+    let in_window = window.is_some();
+    let scale = window.map(|w| w.backingScaleFactor()).unwrap_or(1.0);
     let frame = view.frame();
-    let physical_w = ((frame.size.width * scale).round() as u32).max(1);
-    let physical_h = ((frame.size.height * scale).round() as u32).max(1);
-    Some((physical_w, physical_h, scale as f32))
+    Some(MacGeometry {
+        physical_w: ((frame.size.width * scale).round() as u32).max(1),
+        physical_h: ((frame.size.height * scale).round() as u32).max(1),
+        scale: scale as f32,
+        in_window,
+    })
 }
 
 impl HandlerState {
@@ -553,18 +574,88 @@ impl HandlerState {
         let Some(handle) = self.window_handle else {
             return;
         };
-        let Some((physical_w, physical_h, scale)) = macos_live_geometry(&handle) else {
+        let Some(geom) = macos_live_geometry(&handle) else {
             return;
         };
-        let changed = physical_w != self.width
-            || physical_h != self.height
-            || (scale - self.scale_factor).abs() > f32::EPSILON;
+        let changed = geom.physical_w != self.width
+            || geom.physical_h != self.height
+            || (geom.scale - self.scale_factor).abs() > f32::EPSILON;
         if !changed {
             return;
         }
-        let logical_w = (physical_w as f32 / scale).round() as u32;
-        let logical_h = (physical_h as f32 / scale).round() as u32;
-        self.apply_physical_size(physical_w, physical_h, scale, logical_w, logical_h);
+        let logical_w = (geom.physical_w as f32 / geom.scale).round() as u32;
+        let logical_h = (geom.physical_h as f32 / geom.scale).round() as u32;
+        self.apply_physical_size(
+            geom.physical_w,
+            geom.physical_h,
+            geom.scale,
+            logical_w,
+            logical_h,
+        );
+    }
+
+    /// The geometry to initialize with, and whether it is trustworthy yet.
+    ///
+    /// On macOS the backing scale is only knowable once the view belongs to a
+    /// window — before that `backingScaleFactor()` has nothing to report and
+    /// baseview's cached value is its `unwrap_or(1.0)` fallback. Initializing
+    /// then builds the surface and the Blitz viewport at scale 1, so on a
+    /// Retina display the editor comes up at half size and stays there until
+    /// something else forces a resize. That is the "wrong size until I nudge
+    /// the window" behaviour.
+    ///
+    /// So: wait for the view to be in a window. Bounded, because a host that
+    /// never puts it in one must still get a painted editor rather than the
+    /// blank grey we just finished fixing.
+    #[cfg(target_os = "macos")]
+    fn init_geometry(&mut self, window: &WindowContext) -> Option<(u32, u32, f32, u32, u32)> {
+        const MAX_WAIT_FRAMES: u32 = 120; // ~2s at the 15ms frame timer.
+
+        let live = self.window_handle.and_then(|h| macos_live_geometry(&h));
+        match live {
+            Some(geom) if geom.in_window => {
+                let logical_w = (geom.physical_w as f32 / geom.scale).round() as u32;
+                let logical_h = (geom.physical_h as f32 / geom.scale).round() as u32;
+                Some((
+                    geom.physical_w,
+                    geom.physical_h,
+                    geom.scale,
+                    logical_w,
+                    logical_h,
+                ))
+            }
+            _ if self.init_wait_frames < MAX_WAIT_FRAMES => {
+                self.init_wait_frames += 1;
+                None
+            }
+            _ => {
+                nice_plug_core::nice_warn!(
+                    "[INIT] view never joined a window after {} frames — initializing at the \
+                     scale baseview reported, which may be wrong on a HiDPI display",
+                    MAX_WAIT_FRAMES
+                );
+                let size = window.size();
+                Some((
+                    size.physical.width,
+                    size.physical.height,
+                    size.scale_factor as f32,
+                    size.logical.width as u32,
+                    size.logical.height as u32,
+                ))
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn init_geometry(&mut self, window: &WindowContext) -> Option<(u32, u32, f32, u32, u32)> {
+        let size = window.size();
+        Some((
+            size.physical.width,
+            size.physical.height,
+            size.scale_factor as f32,
+            size.logical.width as u32,
+            size.logical.height as u32,
+        ))
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -582,16 +673,20 @@ impl HandlerState {
         // frame, and wgpu was never created. That is the blank grey editor on
         // macOS — no [INIT], no surface, nothing painted, no crash to point at.
         //
-        // The wait was never necessary: `on_frame` is handed the WindowContext,
-        // which reports both numbers on demand. Ask it, and initialize.
+        // The wait was never necessary: the geometry can be asked for. What
+        // DOES have to be waited for on macOS is the view joining a window,
+        // without which the backing scale is unknowable — see `init_geometry`.
         if self.wgpu_state.is_none() {
             if !self.received_resize {
-                let size = window.size();
-                self.width = size.physical.width;
-                self.height = size.physical.height;
-                self.scale_factor = size.scale_factor as f32;
-                self.dioxus_state
-                    .set_size(size.logical.width as u32, size.logical.height as u32);
+                let Some((physical_w, physical_h, scale, logical_w, logical_h)) =
+                    self.init_geometry(window)
+                else {
+                    return; // not ready to know our scale yet
+                };
+                self.width = physical_w;
+                self.height = physical_h;
+                self.scale_factor = scale;
+                self.dioxus_state.set_size(logical_w, logical_h);
                 self.received_resize = true;
             }
             self.initialize();
