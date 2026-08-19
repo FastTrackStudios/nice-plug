@@ -3006,16 +3006,40 @@ impl<P: ClapPlugin> Wrapper<P> {
                         scale_factor: f64,
                     ) -> Result<(), Box<dyn Error>> {
                         if let Some(wrapper) = self.wrapper.upgrade() {
-                            use nice_plug_core::editor::dpi::PhysicalSize;
-
-                            let physical_size: PhysicalSize<u32> =
-                                new_size.to_physical(scale_factor);
+                            // CLAP does not fix a unit for GUI sizes — it uses
+                            // whatever the platform's GUI API uses: LOGICAL
+                            // pixels for cocoa, physical for X11 and Win32.
+                            //
+                            // `ext_gui_get_size` reports the editor's stored
+                            // size and `ext_gui_set_size` writes straight back
+                            // into it, and that stored size is logical. Only
+                            // this path scaled up to physical, so on a 2x
+                            // Retina display a plugin asked its host for a
+                            // window twice the size it wanted in each
+                            // dimension, then painted its real size into one
+                            // quarter of the window it got.
+                            let (request_width, request_height) = {
+                                #[cfg(target_os = "macos")]
+                                {
+                                    use nice_plug_core::editor::dpi::LogicalSize;
+                                    let logical: LogicalSize<u32> =
+                                        new_size.to_logical(scale_factor);
+                                    (logical.width, logical.height)
+                                }
+                                #[cfg(not(target_os = "macos"))]
+                                {
+                                    use nice_plug_core::editor::dpi::PhysicalSize;
+                                    let physical: PhysicalSize<u32> =
+                                        new_size.to_physical(scale_factor);
+                                    (physical.width, physical.height)
+                                }
+                            };
 
                             if unsafe_clap_call! {
                                 &*self.host_gui=>request_resize(
                                     &*wrapper.host_callback,
-                                    physical_size.width as u32,
-                                    physical_size.height as u32,
+                                    request_width as u32,
+                                    request_height as u32,
                                 )
                             } {
                                 Ok(())

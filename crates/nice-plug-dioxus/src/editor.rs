@@ -184,8 +184,21 @@ impl Editor for DioxusEditor {
         })
     }
 
+    /// The editor size in the unit the platform's GUI API uses.
+    ///
+    /// The return type says physical, and on X11 and Win32 it is. macOS is the
+    /// exception: cocoa — and therefore CLAP and VST3 on macOS — is defined in
+    /// LOGICAL pixels, so scaling up here reports a Retina host a window twice
+    /// as large in each dimension as the editor wants, and the editor then
+    /// paints its real size into a quarter of the window it is given.
+    ///
+    /// The size is stored logical either way; the only question is whether to
+    /// scale it on the way out.
     fn size(&self) -> PhysicalSize<u32> {
         let (width, height) = self.state.scaled_logical_size();
+        if cfg!(target_os = "macos") {
+            return PhysicalSize::new(width, height);
+        }
         let scale = self.scaling_factor.load().unwrap_or(1.0) as f64;
         LogicalSize::new(width as f64, height as f64).to_physical(scale)
     }
@@ -266,20 +279,32 @@ impl EditorHandle for DioxusEditorHandle {
     /// match.
     fn set_size(&self, new_size: PhysicalSize<u32>, window: &Self::Window) -> bool {
         let current = window.size();
+
+        // Mirror of `size()`: the host speaks the platform GUI API's unit, so
+        // on macOS these numbers are already LOGICAL and converting them again
+        // halves the editor on a 2x display. Everywhere else they are physical.
+        let (physical, logical) = if cfg!(target_os = "macos") {
+            let logical = LogicalSize::new(new_size.width as f64, new_size.height as f64);
+            (logical.to_physical(current.scale_factor), logical)
+        } else {
+            (new_size, new_size.to_logical(current.scale_factor))
+        };
+
         if !self.state.resize_hint().is_size_valid(
-            new_size,
+            physical,
             current.physical,
             current.scale_factor,
         ) {
             return false;
         }
 
-        let logical: LogicalSize<f64> = new_size.to_logical(current.scale_factor);
         self.state
             .host_set_size(logical.width as u32, logical.height as u32);
 
-        if let Err(e) = window.resize(new_size) {
-            nice_plug_core::nice_error!("Failed to resize editor window to {new_size:?}: {e}");
+        // baseview wants the size in its own terms; hand it the logical size
+        // directly rather than a physical one it would have to convert back.
+        if let Err(e) = window.resize(LogicalSize::new(logical.width, logical.height)) {
+            nice_plug_core::nice_error!("Failed to resize editor window to {logical:?}: {e}");
             return false;
         }
         self.needs_redraw.store(true, Ordering::Relaxed);

@@ -555,10 +555,31 @@ fn macos_live_geometry(handle: &RawWindowHandle) -> Option<MacGeometry> {
     let window = view.window();
     let in_window = window.is_some();
     let scale = window.map(|w| w.backingScaleFactor()).unwrap_or(1.0);
-    let frame = view.frame();
+
+    // `convertRectToBacking` is the authoritative point→backing-pixel
+    // conversion: it is what AppKit itself uses to size the backing store, and
+    // unlike `frame * backingScaleFactor` it cannot double-count a scale that
+    // some ancestor has already applied.
+    let bounds = view.bounds();
+    let backing = view.convertRectToBacking(bounds);
+
+    if diagnostics_enabled() {
+        nice_plug_core::nice_log!(
+            "[GEOM] frame={}x{} bounds={}x{} backing={}x{} scale={} in_window={}",
+            view.frame().size.width,
+            view.frame().size.height,
+            bounds.size.width,
+            bounds.size.height,
+            backing.size.width,
+            backing.size.height,
+            scale,
+            in_window
+        );
+    }
+
     Some(MacGeometry {
-        physical_w: ((frame.size.width * scale).round() as u32).max(1),
-        physical_h: ((frame.size.height * scale).round() as u32).max(1),
+        physical_w: (backing.size.width.round() as u32).max(1),
+        physical_h: (backing.size.height.round() as u32).max(1),
         scale: scale as f32,
         in_window,
     })
