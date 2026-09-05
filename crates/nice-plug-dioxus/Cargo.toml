@@ -77,6 +77,10 @@ keyboard-types = "0.8"
 # Same smol_str version as blitz-traits for BlitzKeyEvent text field
 smol_str = "0.3"
 cursor-icon = "1"
+# `data:` URL decoding for the editor's resource provider (src/net.rs).
+# The same crate blitz's own provider uses, so no second implementation of
+# the format and no version skew in how a document's images decode.
+data-url = "0.3"
 
 [dev-dependencies]
 # Example needs these directly

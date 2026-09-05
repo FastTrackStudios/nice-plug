@@ -415,6 +415,10 @@ impl HandlerState {
             vdom,
             DocumentConfig {
                 viewport: Some(viewport),
+                // Without a provider blitz resolves no resources at all,
+                // so an editor renders no images. This one serves data:
+                // and file: only — see crate::net.
+                net_provider: Some(crate::net::redraw_provider(self.needs_redraw.clone())),
                 ..Default::default()
             },
         );

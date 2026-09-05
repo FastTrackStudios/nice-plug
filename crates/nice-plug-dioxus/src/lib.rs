@@ -171,6 +171,8 @@ impl SharedState {
 // Public modules
 pub mod assets;
 pub mod context;
+/// Resource loading for the editor's document — see [`net::LocalAssets`].
+pub mod net;
 pub mod custom_paint;
 #[cfg(feature = "embedded")]
 pub mod embedded;
