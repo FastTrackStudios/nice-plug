@@ -347,10 +347,18 @@ pub fn render_screenshot(
     let vdom = VirtualDom::new(app);
 
     let viewport = Viewport::new(width, height, 1.0, ColorScheme::Light);
+    // Declared before the document so the resource provider and the param
+    // context flag the SAME frame — two flags would mean an image landing
+    // could set one nobody reads.
+    let needs_redraw = Arc::new(AtomicBool::new(false));
     let mut dioxus_doc = DioxusDocument::new(
         vdom,
         DocumentConfig {
             viewport: Some(viewport),
+            // Without a provider blitz resolves no resources at all,
+            // so an editor renders no images. This one serves data:
+            // and file: only — see crate::net.
+            net_provider: Some(crate::net::redraw_provider(needs_redraw.clone())),
             ..Default::default()
         },
     );
@@ -361,8 +369,7 @@ pub fn render_screenshot(
     let doc_proxy_rc = Rc::new(doc_proxy);
 
     let gui_context = GuiContext::new(Arc::new(StandaloneGuiContext));
-    let needs_redraw = Arc::new(AtomicBool::new(false));
-    let param_context = ParamContext::new(gui_context, needs_redraw);
+    let param_context = ParamContext::new(gui_context, needs_redraw.clone());
     let dioxus_state = DioxusState::new(move || (width, height));
 
     let overlay_registry = OverlayRegistry::new();

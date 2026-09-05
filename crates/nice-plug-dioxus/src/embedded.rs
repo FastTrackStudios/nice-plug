@@ -249,6 +249,13 @@ impl DioxusEmbeddedEditor {
                                 vdom,
                                 DocumentConfig {
                                     viewport: Some(viewport),
+                                    // Without a provider blitz resolves no resources at
+                                    // all, so an editor renders no images. This one
+                                    // serves data: and file: only — see crate::net. No
+                                    // waker here: the embedded path's dirty flag is a
+                                    // field on the handler rather than a shared Arc, and
+                                    // the host drives its repaints.
+                                    net_provider: Some(crate::net::LocalAssets::shared(None)),
                                     ..Default::default()
                                 },
                             );
@@ -334,6 +341,13 @@ impl DioxusEmbeddedEditor {
                                 vdom,
                                 DocumentConfig {
                                     viewport: Some(viewport),
+                                    // Without a provider blitz resolves no resources at
+                                    // all, so an editor renders no images. This one
+                                    // serves data: and file: only — see crate::net. No
+                                    // waker here: the embedded path's dirty flag is a
+                                    // field on the handler rather than a shared Arc, and
+                                    // the host drives its repaints.
+                                    net_provider: Some(crate::net::LocalAssets::shared(None)),
                                     ..Default::default()
                                 },
                             );
