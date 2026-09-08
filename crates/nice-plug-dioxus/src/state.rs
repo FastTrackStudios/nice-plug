@@ -56,6 +56,15 @@ pub struct DioxusState {
     #[serde(skip)]
     open: AtomicBool,
 
+    /// The host's description of the track this instance sits on.
+    ///
+    /// Upstream pushes this to the editor through `Editor::track_info_updated`
+    /// rather than exposing it on `GuiContext`, so the editor has to keep it.
+    /// Read by the UI on its own tick — the EQ's cheat-sheet picks an
+    /// instrument profile from the track name.
+    #[serde(skip)]
+    track_info: parking_lot::RwLock<Option<nice_plug_core::plugin::TrackInfo>>,
+
     /// Pending resize request (width, height). Set by UI, consumed by window handler.
     /// This triggers window.resize() + gui_context.request_resize() (plugin→host).
     #[serde(skip)]
@@ -98,6 +107,26 @@ impl Debug for DioxusState {
 }
 
 impl DioxusState {
+    /// The host's current track info, if it has reported any.
+    pub fn track_info(&self) -> Option<nice_plug_core::plugin::TrackInfo> {
+        self.track_info.read().clone()
+    }
+
+    /// The track name the host last reported, if any. The common case — the
+    /// EQ's cheat-sheet wants only this.
+    pub fn track_name(&self) -> Option<String> {
+        self.track_info
+            .read()
+            .as_ref()
+            .map(|i| i.name().to_owned())
+            .filter(|n| !n.is_empty())
+    }
+
+    /// Called by the editor when the host reports new track info.
+    pub fn set_track_info(&self, info: nice_plug_core::plugin::TrackInfo) {
+        *self.track_info.write() = Some(info);
+    }
+
     /// Create a new editor state with a default size function.
     ///
     /// The size function provides the initial/default window size in logical pixels.
@@ -116,6 +145,7 @@ impl DioxusState {
             height: AtomicCell::new(0),
             scale_factor: AtomicCell::new(1.0),
             open: AtomicBool::new(false),
+            track_info: parking_lot::RwLock::new(None),
             pending_resize: AtomicCell::new(None),
             pending_host_resize: AtomicCell::new(None),
             revalidate_frames: AtomicCell::new(0),
@@ -136,6 +166,7 @@ impl DioxusState {
             height: AtomicCell::new(0),
             scale_factor: AtomicCell::new(default_scale_factor),
             open: AtomicBool::new(false),
+            track_info: parking_lot::RwLock::new(None),
             pending_resize: AtomicCell::new(None),
             pending_host_resize: AtomicCell::new(None),
             revalidate_frames: AtomicCell::new(0),
@@ -166,6 +197,9 @@ impl DioxusState {
             height: AtomicCell::new(h),
             scale_factor: AtomicCell::new(self.scale_factor.load()),
             open: AtomicBool::new(self.open.load(Ordering::Relaxed)),
+            // Carried over: this is the same editor being re-sized, so the
+            // host has not re-reported which track it is on.
+            track_info: parking_lot::RwLock::new(self.track_info.read().clone()),
             pending_resize: AtomicCell::new(None),
             pending_host_resize: AtomicCell::new(None),
             revalidate_frames: AtomicCell::new(0),

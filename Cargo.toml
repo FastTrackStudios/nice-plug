@@ -8,7 +8,10 @@ members = [
   "crates/nice-log",
   "crates/cargo-nice-plug",
   "crates/xtask",
-  "crates/nice-plug-egui",
+  # FTS delta: excluded on the FTS toolchain pin (rust 1.94). Upstream moved
+  # nice-plug-egui to egui 0.36, which requires rustc 1.95. FTS ships the
+  # dioxus backend and does not build this one; restore it when the pin moves.
+  #"crates/nice-plug-egui",
   "crates/nice-plug-iced",
   # FTS delta: the Dioxus/Blitz editor backend.
   "crates/nice-plug-dioxus",
@@ -17,7 +20,7 @@ members = [
   "examples/byo_gui_softbuffer",
   "examples/byo_gui_wgpu",
   "examples/gain",
-  "examples/gain_egui",
+  #"examples/gain_egui",  # see nice-plug-egui above
   "examples/gain_iced",
   #"examples/iced_audio_widget",
   "examples/midi_inverter",

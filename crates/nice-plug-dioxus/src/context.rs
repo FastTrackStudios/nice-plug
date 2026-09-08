@@ -122,23 +122,6 @@ impl ParamContext {
         &self.gui_context
     }
 
-    /// Request the host to rescan parameter info (names, module paths, visibility).
-    ///
-    /// Call this after changing parameter display names or hiding/showing parameters.
-    /// The host will re-query `get_info()` for all parameters without interrupting audio.
-    /// Corresponds to `CLAP_PARAM_RESCAN_INFO`.
-    pub fn rescan_param_info(&self) {
-        self.gui_context.rescan_param_info();
-    }
-
-    /// Request the host to fully rescan all parameters, including structural changes.
-    ///
-    /// Call this after changing parameter ranges, step counts, or adding/removing parameters.
-    /// This triggers a plugin restart cycle (deactivate → rescan → activate).
-    /// Corresponds to `CLAP_PARAM_RESCAN_ALL`.
-    pub fn rescan_param_all(&self) {
-        self.gui_context.rescan_param_all();
-    }
 }
 
 /// Hook to get the parameter context.

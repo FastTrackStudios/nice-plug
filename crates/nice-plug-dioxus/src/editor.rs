@@ -11,7 +11,7 @@ use dioxus_native::prelude::Element;
 use nice_plug_core::context::gui::GuiContext;
 use nice_plug_core::editor::dpi::{LogicalSize, PhysicalSize};
 use nice_plug_core::editor::{
-    Editor, EditorHandle, EditorWindow, ParentWindowHandle, ResizeHint,
+    Editor, EditorHandle, HostMethods, ParentWindowHandle, ResizeHint, SpawnedEditor,
 };
 use std::error::Error;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -66,6 +66,13 @@ impl DioxusEditor {
 }
 
 impl Editor for DioxusEditor {
+    /// The host telling us which track this instance is on. Upstream pushes
+    /// this rather than exposing it on `GuiContext`, so it is stashed on the
+    /// shared state where the UI can read it on its next tick.
+    fn track_info_updated(&self, info: nice_plug_core::plugin::TrackInfo) {
+        self.state.set_track_info(info);
+    }
+
     type Handle = DioxusEditorHandle;
 
     fn spawn(
@@ -74,8 +81,8 @@ impl Editor for DioxusEditor {
         wait_for_parent: bool,
         suggested_scale_factor: Option<f64>,
         gui_context: GuiContext,
-        host: Option<Box<dyn nice_plug_core::editor::HostCallbacks>>,
-    ) -> Result<EditorWindow<Self::Handle>, Box<dyn Error>> {
+        host: Option<HostMethods>,
+    ) -> Result<SpawnedEditor<Self::Handle>, Box<dyn Error>> {
         let (width, height) = self.state.inner_logical_size();
         let scaling_factor = self.scaling_factor.load();
 
@@ -120,13 +127,12 @@ impl Editor for DioxusEditor {
             }
         }
 
-        let host = host.map(|host| {
-            let main_thread = host.main_thread_caller();
-            let host = baseview::host::Host::new().with_callbacks(HostAdapter { host });
-            match main_thread {
-                Some(caller) => host.with_main_thread(MainThreadAdapter { caller }),
-                None => host,
-            }
+        // Upstream hands both halves over as `HostMethods` now; the
+        // main-thread caller is no longer an optional hook on the callbacks.
+        let host = host.map(|HostMethods { callbacks, main_thread_caller }| {
+            baseview::host::Host::new()
+                .with_callbacks(HostAdapter { host: callbacks })
+                .with_main_thread(MainThreadAdapter { caller: main_thread_caller })
         });
 
         // `with_parent` borrows the adapter, so it has to outlive the builder.
@@ -175,7 +181,7 @@ impl Editor for DioxusEditor {
 
         self.state.set_open(true);
 
-        Ok(EditorWindow {
+        Ok(SpawnedEditor {
             handle: DioxusEditorHandle {
                 state: self.state.clone(),
                 needs_redraw: self.needs_redraw.clone(),
@@ -277,7 +283,11 @@ impl EditorHandle for DioxusEditorHandle {
     /// handler reconfigures the surface and relayouts blitz without asking the
     /// host to resize again (that would loop), then resizes the child window to
     /// match.
-    fn set_size(&self, new_size: PhysicalSize<u32>, window: &Self::Window) -> bool {
+    fn set_size(
+        &self,
+        new_size: PhysicalSize<u32>,
+        window: &Self::Window,
+    ) -> Result<(), Self::Error> {
         let current = window.size();
 
         // Mirror of `size()`: the host speaks the platform GUI API's unit, so
@@ -295,7 +305,12 @@ impl EditorHandle for DioxusEditorHandle {
             current.physical,
             current.scale_factor,
         ) {
-            return false;
+            // `baseview::Error` is opaque; a handler error is the documented
+            // way to construct one.
+            return Err(baseview::HandlerError::from_boxed(
+                "requested size is outside the editor's resize hint".into(),
+            )
+            .into());
         }
 
         self.state
@@ -305,10 +320,18 @@ impl EditorHandle for DioxusEditorHandle {
         // directly rather than a physical one it would have to convert back.
         if let Err(e) = window.resize(LogicalSize::new(logical.width, logical.height)) {
             nice_plug_core::nice_error!("Failed to resize editor window to {logical:?}: {e}");
-            return false;
+            return Err(e);
         }
         self.needs_redraw.store(true, Ordering::Relaxed);
-        true
+        Ok(())
+    }
+
+    /// The host giving the window thread main-thread time it asked for. On X11
+    /// baseview parks host callbacks until they are polled from the main
+    /// thread; this is that poll, and without it a plugin-driven resize moves
+    /// the child window and never the DAW's frame.
+    fn host_main_thread_callback(&self, window: &Self::Window) {
+        window.host_main_thread_callback();
     }
 
     fn adjust_size(
@@ -324,7 +347,7 @@ impl EditorHandle for DioxusEditorHandle {
         ))
     }
 
-    fn set_suggested_scale_factor(
+    fn set_fallback_scale_factor(
         &self,
         scale_factor: f64,
         window: &Self::Window,

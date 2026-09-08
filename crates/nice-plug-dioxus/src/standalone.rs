@@ -40,6 +40,11 @@ use vello::{
 struct StandaloneGuiContext;
 
 impl GuiContextInner for StandaloneGuiContext {
+    /// Standalone has no host to restart, so this is a no-op. Upstream added
+    /// it to `GuiContextInner` for the wrapped backends, where it maps onto
+    /// the host's own restart request.
+    fn request_restart(&self) {}
+
     fn plugin_api(&self) -> PluginApi {
         PluginApi::Clap
     }
