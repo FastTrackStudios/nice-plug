@@ -18,7 +18,7 @@ crate-type = ["cdylib"]
 Add the nice-plug dependency to your `Cargo.toml`:
 ```toml
 [dependencies]
-nice-plug = "0.2"
+nice-plug = "0.3"
 ```
 
 > For a list of available crate flags, see
@@ -33,7 +33,7 @@ If you wish to also export your plugin as a standalone application, add "lib" to
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
-nice-plug = { version = "0.2", features = ["standalone"] }
+nice-plug = { version = "0.3", features = ["standalone"] }
 ```
 
 And add a `main.rs` file next to the `lib.rs` file with the following contents:
@@ -67,25 +67,11 @@ debug = true
 strip = "none"
 ```
 
-Also, GUI libraries that depend on [wgpu](https://wgpu.rs/) may be very spammy. You can add the following dependencies to help reduce the log spam:
-```toml
-[dependencies]
-# Reduce wgpu log spam
-log = { version = "0.4", features = [
-    "max_level_debug",
-    "release_max_level_info",
-] }
-tracing = { version = "0.1", features = [
-    "max_level_info",
-    "release_max_level_info",
-] }
-```
-
 Additionally, you can enable the `unsafe_flush_denormals` feature flag, which can lead to a significant performance increases in some cases. HOWEVER, the Rust compiler technically considers this to be undefined behavior, so use at your own risk! Though if any UB did occur, the only damage will likely just be audio glitches, not memory safety issues.
 
 ```toml
 [dependencies]
-nice-plug = { version = "0.2", features = ["unsafe_flush_denormals"] }
+nice-plug = { version = "0.3", features = ["unsafe_flush_denormals"] }
 ```
 
 ## 4. Build system setup
@@ -137,11 +123,7 @@ impl Default for MyPluginParams {
             gain: FloatParam::new(
                 "Gain",
                 util::db_to_gain(0.0),
-                FloatRange::Skewed {
-                    min: util::db_to_gain(-30.0),
-                    max: util::db_to_gain(30.0),
-                    factor: FloatRange::gain_skew_factor(-30.0, 30.0),
-                },
+                FloatRange::Linear{-30.0, 30.0},
             )
             .with_smoother(SmoothingStyle::Logarithmic(50.0))
             .with_unit(" dB")
@@ -277,5 +259,9 @@ Debug output from your plugin can be found in Bitwig's `engine.log` file. (`~/.B
 ## 8. Next steps
 
 Currently nice-plug's documentation isn't very extensive. For now, you can check out the examples in the [nice-plug repository](https://codeberg.org/RustAudio/nice-plug), and also check out the [API documentation](https://docs.rs/nice-plug).
+
+It is recommended to not even worry about GUI when developing the DSP of your plugin, especially if you are just starting out learning DSP. nice-plug makes it easy to create GUI-less plugins!
+
+For an extensive list of resources on audio plugin development in general, see [Awesome Audio DSP](https://codeberg.org/BillyDM/awesome-audio-dsp).
 
 If you have any questions, feel free to join us in the [Rust Audio Discord Server](https://discord.gg/Qs2Zwtf9Gf) in the `#nice-plug` channel!

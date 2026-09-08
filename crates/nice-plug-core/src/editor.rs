@@ -17,8 +17,9 @@ pub use embedded::{
 pub use dpi;
 
 use crate::context::gui::GuiContext;
+use crate::plugin::TrackInfo;
 
-pub struct EditorWindow<E: EditorHandle> {
+pub struct SpawnedEditor<E: EditorHandle> {
     /// A handle to the instance of an open [`Editor`].
     ///
     /// When this handle is dropped, the editor instance is also dropped.
@@ -33,29 +34,6 @@ pub struct EditorWindow<E: EditorHandle> {
     pub window: E::Window,
 }
 
-/// Lets the window thread ask for time on the main thread.
-///
-/// X11 windows run on their own thread, so a callback the window wants to make
-/// *to the host* — a resize request, most importantly — cannot be made from
-/// there: hosts require their GUI calls on the main thread. baseview therefore
-/// queues those callbacks and hands them over only when
-/// [`EditorHandle::poll_host_callbacks()`] is called on the main thread. This
-/// is the other half: the window thread uses it to ask the host for a
-/// main-thread callback in which that poll can happen.
-///
-/// Without one, plugin-driven resizes are enqueued on Linux and never
-/// delivered — the child window changes size and the host's frame does not.
-/// Windows and macOS keep their windows on the main thread already, so there
-/// it is unused.
-///
-/// (This mirrors
-/// [`baseview::host::HostMainThreadCaller`](https://docs.rs/baseview/latest/baseview/host/trait.HostMainThreadCaller.html),
-/// for the same reason [`HostCallbacks`] does.)
-pub trait HostMainThreadCaller: Send + 'static {
-    /// Ask the host to call back on the main thread. The wrapper is expected to
-    /// call [`EditorHandle::poll_host_callbacks()`] when it does.
-    fn call_main_thread(&mut self);
-}
 
 /// A handler for baseview windows to interact with their host.
 ///
@@ -83,16 +61,29 @@ pub trait HostCallbacks: 'static {
     /// anymore.
     fn destroyed(&mut self);
 
-    /// How the window thread can ask for main-thread time, if this wrapper can
-    /// provide it. See [`HostMainThreadCaller`].
+}
+
+/// A special handler for the Window thread to wake up and call methods on the main thread.
+///
+/// (This is a re-implementation of
+/// [`baseview::host::HostMainThreadCaller`](https://docs.rs/baseview/latest/baseview/host/trait.HostMainThreadCaller.html)
+/// to avoid directly depending on `baseview` until it is stabilized.)
+///
+/// # Platform compatibility notes
+///
+/// This is only needed on X11, as Windows and macOS windows already run on the main thread.
+pub trait HostMainThreadCaller: Send + 'static {
+    /// Schedules a callback on the main thread.
     ///
-    /// Returning `None` — the default — means callbacks made from the window
-    /// thread are never delivered, which on X11 is every plugin-driven resize.
-    /// A wrapper with a way to schedule main-thread work (CLAP's
-    /// `host.request_callback`, for one) should override this.
-    fn main_thread_caller(&self) -> Option<Box<dyn HostMainThreadCaller>> {
-        None
-    }
+    /// # Platform compatibility notes
+    ///
+    /// Only X11 needs this. This can be implemented as a no-op on Windows and macOS.
+    fn call_main_thread(&mut self);
+}
+
+pub struct HostMethods {
+    pub callbacks: Box<dyn HostCallbacks>,
+    pub main_thread_caller: Box<dyn HostMainThreadCaller>,
 }
 
 /// A handle to spawned instance of an [`Editor`].
@@ -122,26 +113,20 @@ pub trait EditorHandle: Send + 'static {
     /// This will never be called on the standalone target.
     fn hide(&self, window: &Self::Window) -> Result<(), Self::Error>;
 
-    /// Called by the wrapper when the host has resized the plugin's view (either
-    /// because the host accepted an earlier [`GuiContext::request_resize()`], or
-    /// because the user dragged a host-provided resize handle). The editor should
-    /// resize its own window and contents to match these dimensions.
-    ///
-    /// Return `true` if the editor applied the new size, `false` if it rejected
-    /// it (e.g. the size is outside what the GUI supports). The default
-    /// implementation is a no-op that returns `false`, so editors that don't
-    /// support being resized by the host keep their previous fixed-size
-    /// behavior without any changes.
+    /// Called by the wrapper when the host has resized the plugin's view. The
+    /// editor should resize its own window and contents to match these dimensions.
     ///
     /// This is the counterpart to [`size()`][Editor::size()]: after a successful
     /// `set_size`, `size()` should report the new dimensions.
     ///
     /// This will never be called on the standalone target.
-    fn set_size(&self, new_size: PhysicalSize<u32>, window: &Self::Window) -> bool {
-        let _ = new_size;
-        let _ = window;
-        false
-    }
+    fn set_size(
+        &self,
+        new_size: PhysicalSize<u32>,
+        window: &Self::Window,
+    ) -> Result<(), Self::Error>;
+
+    fn host_main_thread_callback(&self, window: &Self::Window);
 
     /// Return the closest supported size.
     ///
@@ -162,7 +147,7 @@ pub trait EditorHandle: Send + 'static {
     /// operating system there.
     ///
     /// This will never be called on the standalone target.
-    fn set_suggested_scale_factor(
+    fn set_fallback_scale_factor(
         &self,
         scale_factor: f64,
         window: &Self::Window,
@@ -229,14 +214,20 @@ pub trait EditorHandle: Send + 'static {
 
     /// Called when the plugin's state has changed (i.e. a preset was loaded). The
     /// editor should rescan all of its parameters.
+    ///
+    /// Generally you will want to trigger a redraw when this is called.
     fn state_changed(&self) {}
 
     /// Called whenever a specific parameter's value has changed. You don't
     /// need to do anything with this, but this can be used to force a redraw when the host sends a
     /// new value for a parameter or when a parameter change sent to the host gets processed.
+    ///
+    /// Generally you will want to trigger a redraw when this is called.
     fn param_value_changed(&self, id: &str, normalized_value: f32);
 
     /// Called whenever a specific parameter's monophonic modulation value has changed.
+    ///
+    /// Generally you will want to trigger a redraw when this is called.
     fn param_modulation_changed(&self, id: &str, modulation_offset: f32);
 }
 
@@ -257,7 +248,7 @@ pub trait Editor: Send {
     ///
     /// If an error is returned, then the editor will not open.
     ///
-    /// If [`set_scale_factor()`][Self::set_scale_factor()] has been called, then any created
+    /// If [`EditorHandle::set_fallback_scale_factor()`] has been called, then any created
     /// windows should have their sizes multiplied by that factor.
     ///
     /// The wrapper guarantees that a previous handle has been dropped before this function is
@@ -273,10 +264,10 @@ pub trait Editor: Send {
         &self,
         parent: Option<ParentWindowHandle>,
         wait_for_parent: bool,
-        suggested_scale_factor: Option<f64>,
+        fallback_scale_factor: Option<f64>,
         gui_context: GuiContext,
-        host: Option<Box<dyn HostCallbacks>>,
-    ) -> Result<EditorWindow<Self::Handle>, Box<dyn Error>>;
+        host: Option<HostMethods>,
+    ) -> Result<SpawnedEditor<Self::Handle>, Box<dyn Error>>;
 
     /// Returns the (current) size of the editor in physical pixels.
     fn size(&self) -> PhysicalSize<u32>;
@@ -288,10 +279,18 @@ pub trait Editor: Send {
     /// The default is [`ResizeHint::default()`], which is **not** resizable, so
     /// editors keep their fixed-size behavior unless they opt in. An editor that
     /// supports host resizing should return a hint with `can_resize: true` (and
-    /// usually also implement [`set_size()`][Self::set_size()] to apply the new
+    /// usually also implement [`EditorHandle::set_size()`] to apply the new
     /// size). See [`ResizeHint`] for the per-axis and aspect-ratio options.
     fn resize_hint(&self) -> ResizeHint {
         ResizeHint::default()
+    }
+
+    /// Called when the provided track information has changed.
+    ///
+    /// Generally you will want to trigger a redraw when this is called, if your GUI uses the
+    /// track informatioin.
+    fn track_info_updated(&self, info: TrackInfo) {
+        let _ = info;
     }
 }
 
@@ -328,6 +327,16 @@ impl EditorHandle for () {
         Err(DummyEditorError)
     }
 
+    fn host_main_thread_callback(&self, _window: &Self::Window) {}
+
+    fn set_size(
+        &self,
+        _new_size: PhysicalSize<u32>,
+        _window: &Self::Window,
+    ) -> Result<(), Self::Error> {
+        Err(DummyEditorError)
+    }
+
     fn param_value_changed(&self, _id: &str, _normalized_value: f32) {}
 
     fn param_modulation_changed(&self, _id: &str, _modulation_offset: f32) {}
@@ -340,10 +349,10 @@ impl Editor for () {
         &self,
         _parent: Option<ParentWindowHandle>,
         _wait_for_parent: bool,
-        _suggested_scale_factor: Option<f64>,
+        _fallback_scale_factor: Option<f64>,
         _gui_context: GuiContext,
-        _host: Option<Box<dyn HostCallbacks>>,
-    ) -> Result<EditorWindow<Self::Handle>, Box<dyn Error>> {
+        _host: Option<HostMethods>,
+    ) -> Result<SpawnedEditor<Self::Handle>, Box<dyn Error>> {
         Err(String::from("Plugin does not implement an editor").into())
     }
 
@@ -642,7 +651,7 @@ impl HasWindowHandle for ParentWindowHandle {
 }
 
 /// A non-character key delivered to
-/// [`Editor::on_virtual_key_from_host`]. Variant names mirror standard
+/// [`EditorHandle::on_virtual_key_from_host`]. Variant names mirror standard
 /// keyboard nomenclature; printable ASCII characters never appear here
 /// because they flow through the plugin window's native keyboard path
 /// instead.

@@ -9,27 +9,6 @@ use crate::{
 
 use super::PluginApi;
 
-/// Information about the host track / channel this plugin instance is inserted
-/// on, when the host exposes it (CLAP `track-info`). Editors can use this to
-/// adapt their UI — e.g. an EQ showing instrument-specific frequency guides
-/// based on the track name. All fields are best-effort: a host may provide only
-/// some of them (signalled by the `has_*` flags it sets), so each is optional.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct TrackInfo {
-    /// The track / channel name (e.g. "Kick In", "Lead Vox"), if provided.
-    pub name: Option<String>,
-    /// Track color as RGBA, if provided.
-    pub color: Option<(u8, u8, u8, u8)>,
-    /// Number of audio channels on the track, if provided.
-    pub channel_count: Option<i32>,
-    /// The track is a return / FX track.
-    pub is_return: bool,
-    /// The track is a bus / group.
-    pub is_bus: bool,
-    /// The track is the master / main output.
-    pub is_master: bool,
-}
-
 /// Callbacks the plugin can make when the user interacts with its GUI such as updating parameter
 /// values. This is passed to the plugin during [`Editor::spawn()`][crate::editor::Editor::spawn()].
 /// All of these functions assume they're being called from the main GUI thread.
@@ -108,36 +87,6 @@ impl GuiContext {
     pub fn set_state(&self, state: PluginState) {
         self.inner.set_state(state);
     }
-
-    // ── FTS fork additions ──────────────────────────────────────────────
-    // Forwarders for the extra `GuiContextInner` methods the fork adds, so
-    // they are reachable through the `GuiContext` value editors are handed.
-
-    /// Ask the host to re-read every parameter's *metadata* (name, range,
-    /// flags, value-to-string) without touching the values themselves.
-    ///
-    /// Used when a parameter's presentation changes at runtime — e.g. a mode
-    /// switch that relabels a knob.
-    pub fn rescan_param_info(&self) {
-        self.inner.rescan_param_info();
-    }
-
-    /// Ask the host to re-read every parameter's metadata *and* value.
-    ///
-    /// The heavier counterpart to [`rescan_param_info`][Self::rescan_param_info];
-    /// use it after wholesale changes such as loading a preset.
-    pub fn rescan_param_all(&self) {
-        self.inner.rescan_param_all();
-    }
-
-    /// Information about the track this plugin instance sits on (name, color,
-    /// channel count, bus flags), when the host provides it.
-    ///
-    /// Backed by CLAP's `track-info/1`. Returns `None` on hosts that don't
-    /// support it.
-    pub fn track_info(&self) -> Option<TrackInfo> {
-        self.inner.track_info()
-    }
 }
 
 /// Callbacks the plugin can make when the user interacts with its GUI such as updating parameter
@@ -191,31 +140,8 @@ pub trait GuiContextInner: Send + Sync + 'static {
     /// restored at the end of the current processing cycle.
     fn set_state(&self, state: PluginState);
 
-    /// Request the host to rescan parameter info. Use this after changing parameter display names,
-    /// module paths, or visibility. The host will re-query `get_info()` for all parameters.
-    ///
-    /// This corresponds to `CLAP_PARAM_RESCAN_INFO` and can be called at any time.
-    fn rescan_param_info(&self) {
-        // Default no-op for hosts/wrappers that don't support this
-    }
-
-    /// Request the host to fully rescan all parameters, including structural changes like
-    /// adding/removing parameters or changing ranges and step counts.
-    ///
-    /// This corresponds to `CLAP_PARAM_RESCAN_ALL` and requires a plugin restart cycle
-    /// (deactivate → rescan → activate). The host will call `request_restart()` automatically.
-    fn rescan_param_all(&self) {
-        // Default no-op for hosts/wrappers that don't support this
-    }
-
-    /// Information about the host track / channel this instance is on, if the
-    /// host exposes it (CLAP `track-info`). Returns `None` when unknown or
-    /// unsupported. Read fresh each time — the wrapper updates the cached value
-    /// when the host signals a change. Corresponds to `CLAP_EXT_TRACK_INFO`.
-    fn track_info(&self) -> Option<TrackInfo> {
-        // Default: hosts/wrappers without track-info support report nothing.
-        None
-    }
+    /// Request the plugin to be restarted.
+    fn request_restart(&self);
 }
 
 /// An way to run background tasks from the plugin's GUI, equivalent to the
@@ -227,7 +153,7 @@ pub trait GuiContextInner: Send + Sync + 'static {
 /// # Note
 ///
 /// This is only intended to be used from the GUI. Use the methods on
-/// [`ActivateContext`][crate::context::init::ActivateContext] and
+/// [`ActivateContext`][crate::context::activate::ActivateContext] and
 /// [`ProcessContext`][crate::context::process::ProcessContext] to run tasks during the `activate()`
 /// and `process()` functions.
 //

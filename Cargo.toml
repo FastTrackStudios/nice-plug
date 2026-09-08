@@ -9,11 +9,8 @@ members = [
   "crates/cargo-nice-plug",
   "crates/xtask",
   "crates/nice-plug-egui",
-  # FTS fork delta: upstream's baseview-03 branch ported the egui backend but
-  # left the iced one on the pre-rework `Editor` trait, so it does not build.
-  # FTS ships the dioxus backend and has no way to test iced — excluded rather
-  # than carrying a speculative port. Restore when upstream ports it.
-  #"crates/nice-plug-iced",
+  "crates/nice-plug-iced",
+  # FTS delta: the Dioxus/Blitz editor backend.
   "crates/nice-plug-dioxus",
 
   "examples/byo_gui_gl",
@@ -21,8 +18,8 @@ members = [
   "examples/byo_gui_wgpu",
   "examples/gain",
   "examples/gain_egui",
-  #"examples/gain_iced",  # see nice-plug-iced above
-  #"examples/iced_audio_widget", // TODO: Add this back when nice-plug-core 0.2 is published
+  "examples/gain_iced",
+  #"examples/iced_audio_widget",
   "examples/midi_inverter",
   "examples/poly_mod_synth",
   "examples/sine",
@@ -33,7 +30,7 @@ default-members = ["crates/nice-plug"]
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.87"
+rust-version = "1.88"
 authors = [
   "Robbert van der Helm <mail@robbertvanderhelm.nl>",
   "Billy Messenger <billydm@noreply.codeberg.org>",
@@ -42,21 +39,24 @@ license = "ISC"
 repository = "https://codeberg.org/RustAudio/nice-plug"
 
 [workspace.dependencies]
+# FTS delta: nice-plug-dioxus inherits baseview from the workspace. Upstream
+# declares it per-crate instead, so this entry is ours. Kept at "0.3" so the
+# consuming workspace decides the exact patch level.
+baseview = "0.3"
 anyhow = "1.0.104"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 atomic_float = "1.1"
 atomic_refcell = "0.1"
 bitflags = "2"
-baseview = "0.3"
 raw-window-handle = "0.6"
 realfft = "3.0"
 approx = "0.5.1"
 crossbeam = "0.8"
 triple_buffer = "9.0.0"
-rtrb = "0.3.3"
+rtrb = "0.4.0"
 semver = "1.0.27"
-pollster = "0.4.0"
+pollster = "1.0.1"
 parking_lot = "0.12"
 thiserror = "2"
 windows = ">=0.59, <=0.62"

@@ -1,6 +1,6 @@
 [package]
 name = "nice-plug-egui"
-version = "0.3.0"
+version = "0.4.0"
 authors = [
     "Billy Messenger <billydm@noreply.codeberg.org>",
     "Robbert van der Helm <mail@robbertvanderhelm.nl>",
@@ -22,14 +22,9 @@ keyboard_focus_workaround = ["egui-baseview/keyboard_focus_workaround"]
 
 [dependencies]
 raw-window-handle.workspace = true
-nice-plug-core = { path = "../nice-plug-core", version = "0.2.0" }
-egui = { version = "0.35.0", default-features = false, features = ["bytemuck"] }
-# FTS fork delta: upstream's baseview-03 branch left this pointing at a sibling
-# checkout (`../../../egui-baseview`), which nothing but that developer's
-# machine has. Point it at the matching upstream branch instead so the
-# workspace resolves anywhere. Revert to the released version once
-# egui-baseview publishes a baseview-0.3 build.
-egui-baseview = { git = "https://codeberg.org/RustAudio/egui-baseview.git", branch = "baseview-03", default-features = false, features = [
+nice-plug-core = { path = "../nice-plug-core", version = "0.3.0" }
+egui = { version = "0.36.1", default-features = false, features = ["bytemuck"] }
+egui-baseview = { version = "0.7.0", default-features = false, features = [
     "tracing",
 ] }
 crossbeam.workspace = true

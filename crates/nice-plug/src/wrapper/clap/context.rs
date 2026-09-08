@@ -94,13 +94,6 @@ impl<P: ClapPlugin> ActivateContext<P> for WrapperActivateContext<'_, P> {
     fn set_current_voice_capacity(&self, capacity: u32) {
         self.wrapper.set_current_voice_capacity(capacity)
     }
-
-    fn raw_host_context(&self) -> Option<*const std::ffi::c_void> {
-        // Hand out the `clap_host` pointer so plugins can call `get_extension()`
-        // for DAW-specific APIs (e.g. REAPER's "cockos.reaper_extension").
-        let host_ptr: *const clap_sys::host::clap_host = &*self.wrapper.host_callback;
-        Some(host_ptr as *const std::ffi::c_void)
-    }
 }
 
 impl<P: ClapPlugin> ProcessContext<P> for WrapperProcessContext<'_, P> {
@@ -137,6 +130,10 @@ impl<P: ClapPlugin> ProcessContext<P> for WrapperProcessContext<'_, P> {
 
     fn set_current_voice_capacity(&self, capacity: u32) {
         self.wrapper.set_current_voice_capacity(capacity)
+    }
+
+    fn request_restart(&self) {
+        self.wrapper.request_restart();
     }
 }
 
@@ -265,26 +262,8 @@ impl<P: ClapPlugin> nice_plug_core::context::gui::GuiContextInner for WrapperGui
             .set_state_object_from_gui(state)
     }
 
-    fn rescan_param_info(&self) {
-        let task_posted = self
-            .wrapper
-            .upgrade()
-            .unwrap()
-            .schedule_gui(Task::RescanParamInfo);
-        crate::nice_debug_assert!(task_posted, "Task queue full, param info rescan not sent");
-    }
-
-    fn rescan_param_all(&self) {
-        let task_posted = self
-            .wrapper
-            .upgrade()
-            .unwrap()
-            .schedule_gui(Task::RescanParamAll);
-        crate::nice_debug_assert!(task_posted, "Task queue full, param rescan-all not sent");
-    }
-
-    fn track_info(&self) -> Option<nice_plug_core::context::gui::TrackInfo> {
-        self.wrapper.upgrade().unwrap().current_track_info()
+    fn request_restart(&self) {
+        self.wrapper.upgrade().unwrap().request_restart();
     }
 }
 

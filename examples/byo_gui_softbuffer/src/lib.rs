@@ -7,12 +7,12 @@ use baseview::{
 use crossbeam::atomic::AtomicCell;
 use nice_plug::{
     context::gui::GuiContext,
-    editor::{EditorHandle, EditorWindow},
+    editor::{EditorHandle, HostMethods, SpawnedEditor},
     prelude::*,
 };
 use softbuffer::SoftBufferError;
 use std::{
-    cell::{Cell, RefCell},
+    cell::RefCell,
     error::Error,
     sync::{
         Arc,
@@ -33,7 +33,6 @@ pub struct SoftbufferWindow {
     params: Arc<MyPluginParams>,
     editor_state: Arc<SoftbufferEditorState>,
     redraw_requested: Arc<AtomicBool>,
-    is_first_frame: Cell<bool>,
 }
 
 struct Surface {
@@ -69,17 +68,13 @@ impl SoftbufferWindow {
             params,
             editor_state,
             redraw_requested,
-            is_first_frame: Cell::new(true),
         })
     }
 }
 
 impl baseview::WindowHandler for SoftbufferWindow {
     fn on_frame(&self) -> Result<(), HandlerError> {
-        if self.is_first_frame.get() {
-            // For some reason, softbuffer doesn't show anything on the first paint.
-            self.is_first_frame.set(false);
-        } else if !self.redraw_requested.swap(false, Ordering::Relaxed) {
+        if !self.redraw_requested.swap(false, Ordering::Relaxed) {
             return Ok(());
         }
 
@@ -117,8 +112,15 @@ impl baseview::WindowHandler for SoftbufferWindow {
 
     fn on_event(&self, event: baseview::Event) -> baseview::EventStatus {
         // Do event processing here.
-        #[allow(clippy::match_single_binding)]
+        #[allow(clippy::single_match)]
+        #[allow(clippy::collapsible_match)]
         match &event {
+            baseview::Event::Window(event) => match event {
+                baseview::WindowEvent::Focused => {
+                    self.redraw_requested.store(true, Ordering::Relaxed);
+                }
+                _ => {}
+            },
             _ => {}
         }
 
@@ -154,10 +156,10 @@ impl Editor for SoftbufferEditor {
         &self,
         parent: Option<ParentWindowHandle>,
         wait_for_parent: bool,
-        suggested_scale_factor: Option<f64>,
+        fallback_scale_factor: Option<f64>,
         gui_context: GuiContext,
-        host: Option<Box<dyn nice_plug::editor::HostCallbacks>>,
-    ) -> Result<EditorWindow<Self::Handle>, Box<dyn Error>> {
+        host: Option<HostMethods>,
+    ) -> Result<SpawnedEditor<Self::Handle>, Box<dyn Error>> {
         let params = Arc::clone(&self.params);
         let editor_state = Arc::clone(&self.editor_state);
 
@@ -166,35 +168,57 @@ impl Editor for SoftbufferEditor {
 
         // The host is a re-implementation of
         // [`baseview::host::HostCallbacks`](https://docs.rs/baseview/latest/baseview/host/trait.HostCallbacks.html)
+        // and
+        // [`baseview::host::HostMainThreadCaller`](https://docs.rs/baseview/latest/baseview/host/trait.HostMainThreadCaller.html)
         // to avoid `nice-plug-core` from depending on `baseview` until it is stabilized.
         //
-        // Create a small wrapper to adapt it to baseview's HostCallbacks trait.
-        struct HostAdapter {
-            host: Box<dyn nice_plug::editor::HostCallbacks>,
-        }
-        impl baseview::host::HostCallbacks for HostAdapter {
-            fn request_resize(
-                &mut self,
-                new_size: baseview::WindowSize,
-            ) -> Result<(), HandlerError> {
-                self.host
-                    .request_resize(new_size.physical.into(), new_size.scale_factor)
-                    .map_err(|e| HandlerError::from_boxed(e))
+        // Create a small wrapper to adapt it to baseview's HostCallbacks traits.
+        let host = {
+            struct HostCallbackAdapter {
+                host: Box<dyn nice_plug::editor::HostCallbacks>,
             }
+            impl baseview::host::HostCallbacks for HostCallbackAdapter {
+                fn request_resize(
+                    &mut self,
+                    new_size: baseview::WindowSize,
+                ) -> Result<(), HandlerError> {
+                    self.host
+                        .request_resize(new_size.physical.into(), new_size.scale_factor)
+                        .map_err(HandlerError::from_boxed)
+                }
 
-            fn destroyed(&mut self) {
-                self.host.destroyed();
+                fn destroyed(&mut self) {
+                    self.host.destroyed();
+                }
             }
-        }
-        let host =
-            host.map(|host| baseview::host::Host::new().with_callbacks(HostAdapter { host }));
+            struct HostMainThreadCallerAdapter {
+                host: Box<dyn nice_plug::editor::HostMainThreadCaller>,
+            }
+            impl baseview::host::HostMainThreadCaller for HostMainThreadCallerAdapter {
+                fn call_main_thread(&mut self) {
+                    self.host.call_main_thread();
+                }
+            }
+            host.map(|host| {
+                baseview::host::Host::new()
+                    .with_callbacks(HostCallbackAdapter {
+                        host: host.callbacks,
+                    })
+                    .with_main_thread(HostMainThreadCallerAdapter {
+                        host: host.main_thread_caller,
+                    })
+            })
+        };
 
         let window = baseview::Window::create_with_host(
             WindowSettings::new()
                 .with_title("Softbuffer Window")
                 .with_size(self.editor_state.logical_size())
+                .with_min_size::<LogicalSize<f32>>(Some(MIN_SIZE))
+                .with_resizable(RESIZE_HINT.can_resize)
                 .with_parent(parent.as_ref())
-                .with_wait_for_parent(wait_for_parent),
+                .with_wait_for_parent(wait_for_parent)
+                .with_fallback_scale_factor(fallback_scale_factor),
             move |window: WindowContext| -> Result<SoftbufferWindow, HandlerError> {
                 editor_state.scale_factor.store(window.size().scale_factor);
 
@@ -210,13 +234,9 @@ impl Editor for SoftbufferEditor {
             host,
         )?;
 
-        if let Some(scale_factor) = suggested_scale_factor {
-            let _ = window.suggest_fallback_scale_factor(scale_factor);
-        }
-
         self.editor_state.open.store(true, Ordering::Release);
 
-        Ok(EditorWindow {
+        Ok(SpawnedEditor {
             handle: SoftbufferEditorHandle {
                 state: Arc::clone(&self.editor_state),
                 redraw_requested,
@@ -226,8 +246,7 @@ impl Editor for SoftbufferEditor {
     }
 
     fn size(&self) -> PhysicalSize<u32> {
-        let scale_factor = self.editor_state.scale_factor();
-        self.editor_state.logical_size().to_physical(scale_factor)
+        self.editor_state.physical_size()
     }
 
     fn resize_hint(&self) -> ResizeHint {
@@ -258,28 +277,35 @@ impl EditorHandle for SoftbufferEditorHandle {
     }
 
     fn show(&self, window: &Self::Window) -> Result<(), Self::Error> {
-        window.show()
+        let res = window.show();
+
+        // TODO: This might be a baseview bug. the `baseview::WindowEvent::Focused`
+        // event does not always get called after `window.show()` is called. Either
+        // that, or baseview needs to add a `baseview::WindowEvent::Shown` event.
+        //
+        // For now, we must manually trigger a redraw.
+        self.redraw_requested.store(true, Ordering::Relaxed);
+
+        res
     }
 
     fn hide(&self, window: &Self::Window) -> Result<(), Self::Error> {
         window.hide()
     }
 
-    fn set_size(&self, new_size: PhysicalSize<u32>, window: &Self::Window) -> bool {
-        let current_size = window.size();
-        if !RESIZE_HINT.is_size_valid(new_size, current_size.physical, current_size.scale_factor) {
-            return false;
-        }
-
-        if let Err(e) = window.resize(new_size) {
-            nice_error!("Failed to resize window to {:?}: {}", new_size, e);
-            false
-        } else {
-            true
-        }
+    fn host_main_thread_callback(&self, window: &Self::Window) {
+        window.host_main_thread_callback();
     }
 
-    fn set_suggested_scale_factor(
+    fn set_size(
+        &self,
+        new_size: PhysicalSize<u32>,
+        window: &Self::Window,
+    ) -> Result<(), Self::Error> {
+        window.resize(new_size)
+    }
+
+    fn set_fallback_scale_factor(
         &self,
         scale_factor: f64,
         window: &Self::Window,
@@ -344,12 +370,10 @@ impl SoftbufferEditorState {
         }
     }
 
-    /// Returns a `(width, height)` pair for the current size of the GUI in logical pixels.
     pub fn logical_size(&self) -> LogicalSize<f32> {
         self.logical_size.load()
     }
 
-    /// Returns a `(width, height)` pair for the current size of the GUI in physical pixels.
     pub fn physical_size(&self) -> PhysicalSize<u32> {
         let logical_size = self.logical_size();
         let scale_factor = self.scale_factor();
@@ -360,7 +384,6 @@ impl SoftbufferEditorState {
         self.scale_factor.load()
     }
 
-    /// Whether the GUI is currently visible.
     pub fn is_open(&self) -> bool {
         self.open.load(Ordering::Acquire)
     }
@@ -399,11 +422,7 @@ impl Default for MyPluginParams {
             gain: FloatParam::new(
                 "Gain",
                 util::db_to_gain(0.0),
-                FloatRange::Skewed {
-                    min: util::db_to_gain(-30.0),
-                    max: util::db_to_gain(30.0),
-                    factor: FloatRange::gain_skew_factor(-30.0, 30.0),
-                },
+                FloatRange::gain_range(-30.0, 30.0),
             )
             .with_smoother(SmoothingStyle::Logarithmic(50.0))
             .with_unit(" dB")

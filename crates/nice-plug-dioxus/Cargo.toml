@@ -24,7 +24,7 @@ softbuffer-blit = ["dep:softbuffer"]
 
 [dependencies]
 # The nice-plug core abstraction layer (Editor trait, GuiContext, Params, persist).
-nice-plug-core = { path = "../nice-plug-core", version = "0.2.0" }
+nice-plug-core = { path = "../nice-plug-core", version = "0.3.0" }
 
 # Use dioxus-native from blitz repo which includes all the rendering + re-exports dioxus core.
 # Pinned to a specific blitz commit for reproducibility — bump `rev` to update upstream.
