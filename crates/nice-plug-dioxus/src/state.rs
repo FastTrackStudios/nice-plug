@@ -56,6 +56,16 @@ pub struct DioxusState {
     #[serde(skip)]
     open: AtomicBool,
 
+    /// Whether a text input in the editor currently holds focus.
+    ///
+    /// Published by the window thread, which owns the document, and read by
+    /// the editor handle on the main thread, which is where the host asks
+    /// whether we want a key. Hosts like REAPER grab Space, Backspace and
+    /// the arrows for their own shortcuts before the plugin's view ever sees
+    /// them; this is how the wrapper answers "not while someone is typing".
+    #[serde(skip)]
+    text_input_focused: AtomicBool,
+
     /// The host's description of the track this instance sits on.
     ///
     /// Upstream pushes this to the editor through `Editor::track_info_updated`
@@ -145,6 +155,7 @@ impl DioxusState {
             height: AtomicCell::new(0),
             scale_factor: AtomicCell::new(1.0),
             open: AtomicBool::new(false),
+            text_input_focused: AtomicBool::new(false),
             track_info: parking_lot::RwLock::new(None),
             pending_resize: AtomicCell::new(None),
             pending_host_resize: AtomicCell::new(None),
@@ -166,6 +177,7 @@ impl DioxusState {
             height: AtomicCell::new(0),
             scale_factor: AtomicCell::new(default_scale_factor),
             open: AtomicBool::new(false),
+            text_input_focused: AtomicBool::new(false),
             track_info: parking_lot::RwLock::new(None),
             pending_resize: AtomicCell::new(None),
             pending_host_resize: AtomicCell::new(None),
@@ -197,6 +209,8 @@ impl DioxusState {
             height: AtomicCell::new(h),
             scale_factor: AtomicCell::new(self.scale_factor.load()),
             open: AtomicBool::new(self.open.load(Ordering::Relaxed)),
+            // Not carried across a clone: it describes the live window.
+            text_input_focused: AtomicBool::new(false),
             // Carried over: this is the same editor being re-sized, so the
             // host has not re-reported which track it is on.
             track_info: parking_lot::RwLock::new(self.track_info.read().clone()),
@@ -319,6 +333,19 @@ impl DioxusState {
     }
 
     /// Returns whether the editor window is currently open.
+    /// Whether a text input in the editor currently holds focus. Written by
+    /// the window thread each time focus can have changed.
+    pub fn set_text_input_focused(&self, focused: bool) {
+        self.text_input_focused
+            .store(focused, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    #[must_use]
+    pub fn text_input_focused(&self) -> bool {
+        self.text_input_focused
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     pub fn is_open(&self) -> bool {
         self.open.load(Ordering::Acquire)
     }

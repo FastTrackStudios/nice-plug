@@ -1124,6 +1124,22 @@ impl HandlerState {
                     _ => {}
                 }
                 doc.handle_ui_event(ui_event);
+
+                // Publish whether a text input now holds focus. The host asks
+                // the editor handle, on the main thread, whether we want a
+                // key it would otherwise treat as a shortcut — and only this
+                // thread owns the document that knows. Recomputed after every
+                // event because a click is what usually changes it.
+                let typing = {
+                    let inner = doc.inner();
+                    inner.get_focussed_node_id().is_some_and(|id| {
+                        inner.get_node(id).and_then(|n| n.element_data()).is_some_and(
+                            |el| el.text_input_data().is_some(),
+                        )
+                    })
+                };
+                self.dioxus_state.set_text_input_focused(typing);
+
                 self.needs_redraw.store(true, Ordering::Relaxed);
                 return EventStatus::Captured;
             }

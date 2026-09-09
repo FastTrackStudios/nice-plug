@@ -11,7 +11,8 @@ use dioxus_native::prelude::Element;
 use nice_plug_core::context::gui::GuiContext;
 use nice_plug_core::editor::dpi::{LogicalSize, PhysicalSize};
 use nice_plug_core::editor::{
-    Editor, EditorHandle, HostMethods, ParentWindowHandle, ResizeHint, SpawnedEditor,
+    Editor, EditorHandle, HostMethods, Modifiers, ParentWindowHandle, ResizeHint, SpawnedEditor,
+    VirtualKeyCode,
 };
 use std::error::Error;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -238,6 +239,46 @@ unsafe impl Send for DioxusEditorHandle {}
 impl EditorHandle for DioxusEditorHandle {
     type Window = baseview::Window;
     type Error = baseview::Error;
+
+    /// Tell the host to keep its hands off the keys while someone is typing.
+    ///
+    /// Hosts claim certain keys for their own shortcuts before the plugin's
+    /// view ever sees them — in REAPER, Space is transport and Backspace and
+    /// the arrows are edit actions. That is what you want almost all of the
+    /// time and exactly what you do not want with a caret blinking in a text
+    /// field, where pressing Space starts playback instead of typing a space.
+    ///
+    /// So: claimed only while a text input actually holds focus, and only for
+    /// the keys such a field would consume. Everything else falls through to
+    /// the host, including every key when nothing is focused — a plugin that
+    /// swallowed the transport whenever its window was open would be worse
+    /// than the bug.
+    ///
+    /// The release is claimed alongside the press so the host cannot pick the
+    /// release up as a separate shortcut.
+    fn on_virtual_key_from_host(
+        &self,
+        key_code: VirtualKeyCode,
+        _is_down: bool,
+        _modifiers: Modifiers,
+    ) -> bool {
+        if !self.state.text_input_focused() {
+            return false;
+        }
+        matches!(
+            key_code,
+            VirtualKeyCode::Space
+                | VirtualKeyCode::Backspace
+                | VirtualKeyCode::Delete
+                | VirtualKeyCode::Tab
+                | VirtualKeyCode::Home
+                | VirtualKeyCode::End
+                | VirtualKeyCode::ArrowLeft
+                | VirtualKeyCode::ArrowRight
+                | VirtualKeyCode::ArrowUp
+                | VirtualKeyCode::ArrowDown
+        )
+    }
 
     fn run_until_closed(window: Self::Window) -> Result<(), Self::Error> {
         window.run_until_closed()
