@@ -200,7 +200,7 @@ struct HandlerState {
     doc_message_receiver: Option<Receiver<DocumentMessage>>,
 
     // Input state
-    mouse_pos: (f32, f32),
+    mouse_pos: crate::events::PointerTrack,
     mouse_buttons: MouseEventButtons,
     modifiers: Modifiers,
     // Cursor icon requested by blitz (e.g. pointer over a clickable element)
@@ -338,7 +338,7 @@ impl HandlerState {
             needs_redraw,
             shared_state,
             doc_message_receiver: None,
-            mouse_pos: (0.0, 0.0),
+            mouse_pos: crate::events::PointerTrack::default(),
             mouse_buttons: MouseEventButtons::empty(),
             modifiers: Modifiers::empty(),
             pending_cursor: Arc::new(Mutex::new(None)),

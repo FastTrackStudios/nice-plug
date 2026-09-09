@@ -133,7 +133,7 @@ struct SoftbufferHandlerState {
     doc_message_receiver: Option<Receiver<DocumentMessage>>,
 
     // Input state
-    mouse_pos: (f32, f32),
+    mouse_pos: crate::events::PointerTrack,
     mouse_buttons: MouseEventButtons,
     modifiers: Modifiers,
 
@@ -220,7 +220,7 @@ impl SoftbufferHandlerState {
             needs_redraw,
             shared_state,
             doc_message_receiver: None,
-            mouse_pos: (0.0, 0.0),
+            mouse_pos: crate::events::PointerTrack::default(),
             mouse_buttons: MouseEventButtons::empty(),
             modifiers: Modifiers::empty(),
             #[cfg(feature = "hot-reload")]

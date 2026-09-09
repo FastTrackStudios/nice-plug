@@ -23,9 +23,22 @@ type BlitzLocation = dioxus_native::prelude::Location;
 /// is held (drag in progress), coordinates are clamped to the viewport so that
 /// Blitz hit-testing still finds the overlay element even when the OS cursor is
 /// outside the plugin window.
+/// Where the pointer is, as the translator has to remember it.
+///
+/// Two positions, because a drag needs both: `clamped` is kept inside the
+/// viewport so Blitz's hit test still finds an element when the cursor has
+/// left the plugin window, and `true_pos` is where the cursor actually is so
+/// the control being dragged keeps moving. Collapsing them — which is what a
+/// bare `(f32, f32)` did — freezes every knob at the edge of the window.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PointerTrack {
+    pub clamped: (f32, f32),
+    pub true_pos: (f32, f32),
+}
+
 pub fn translate_event(
     event: &Event,
-    mouse_pos: &mut (f32, f32),
+    mouse_pos: &mut PointerTrack,
     mouse_buttons: &mut MouseEventButtons,
     modifiers: &mut Modifiers,
     viewport_size: (u32, u32),
@@ -53,7 +66,7 @@ pub fn translate_event(
 
 fn translate_mouse_event(
     event: &MouseEvent,
-    mouse_pos: &mut (f32, f32),
+    mouse_pos: &mut PointerTrack,
     mouse_buttons: &mut MouseEventButtons,
     _modifiers: &Modifiers,
     viewport_size: (u32, u32),
@@ -77,13 +90,17 @@ fn translate_mouse_event(
             position,
             modifiers: mods,
         } => {
-            let (cx, cy) = clamp(position.x as f32, position.y as f32, mouse_buttons);
-            mouse_pos.0 = cx;
-            mouse_pos.1 = cy;
+            let (tx, ty) = (position.x as f32, position.y as f32);
+            let (cx, cy) = clamp(tx, ty, mouse_buttons);
+            mouse_pos.clamped = (cx, cy);
+            // The true position rides along in `screen`, so a drag that runs
+            // past the window edge keeps moving. `mouse_pos` stays clamped
+            // because a later button press has to hit-test somewhere real.
+            mouse_pos.true_pos = (tx, ty);
             Some(UiEvent::PointerMove(BlitzPointerEvent {
                 id: BlitzPointerId::Mouse,
                 is_primary: true,
-                coords: pointer_coords(mouse_pos.0, mouse_pos.1),
+                coords: pointer_coords_at(mouse_pos.clamped.0, mouse_pos.clamped.1, tx, ty),
                 button: MouseEventButton::Main,
                 buttons: *mouse_buttons,
                 mods: convert_modifiers(*mods),
@@ -101,7 +118,12 @@ fn translate_mouse_event(
             Some(UiEvent::PointerDown(BlitzPointerEvent {
                 id: BlitzPointerId::Mouse,
                 is_primary: true,
-                coords: pointer_coords(mouse_pos.0, mouse_pos.1),
+                coords: pointer_coords_at(
+                    mouse_pos.clamped.0,
+                    mouse_pos.clamped.1,
+                    mouse_pos.true_pos.0,
+                    mouse_pos.true_pos.1,
+                ),
                 button: blitz_button,
                 buttons: *mouse_buttons,
                 mods: convert_modifiers(*mods),
@@ -119,7 +141,12 @@ fn translate_mouse_event(
             Some(UiEvent::PointerUp(BlitzPointerEvent {
                 id: BlitzPointerId::Mouse,
                 is_primary: true,
-                coords: pointer_coords(mouse_pos.0, mouse_pos.1),
+                coords: pointer_coords_at(
+                    mouse_pos.clamped.0,
+                    mouse_pos.clamped.1,
+                    mouse_pos.true_pos.0,
+                    mouse_pos.true_pos.1,
+                ),
                 button: blitz_button,
                 buttons: *mouse_buttons,
                 mods: convert_modifiers(*mods),
@@ -138,7 +165,12 @@ fn translate_mouse_event(
             };
             Some(UiEvent::Wheel(BlitzWheelEvent {
                 delta: blitz_delta,
-                coords: pointer_coords(mouse_pos.0, mouse_pos.1),
+                coords: pointer_coords_at(
+                    mouse_pos.clamped.0,
+                    mouse_pos.clamped.1,
+                    mouse_pos.true_pos.0,
+                    mouse_pos.true_pos.1,
+                ),
                 buttons: *mouse_buttons,
                 mods: convert_modifiers(*mods),
                 element: Default::default(),
@@ -159,16 +191,26 @@ fn translate_mouse_event(
 /// Fill all six page/screen/client coordinates with the same pair. We don't
 /// have separate page vs screen vs client in baseview, so they collapse.
 #[inline]
-fn pointer_coords(x: f32, y: f32) -> PointerCoords {
+/// Where the pointer is, for Blitz.
+///
+/// `client`/`page` are what Blitz hit-tests with, so out-of-window drags
+/// clamp them back inside the viewport (see the caller) or `hit()` returns
+/// `None` and the move is thrown away. `screen` carries the **true** position
+/// instead, unclamped — a drag is measured against the desk, not against the
+/// window it started in, and a control that reads `client` freezes the moment
+/// your hand reaches the edge of the plugin window. `fts-audio-ui`'s drag
+/// layer reads `screen` for exactly this reason.
+fn pointer_coords_at(x: f32, y: f32, true_x: f32, true_y: f32) -> PointerCoords {
     PointerCoords {
         page_x: x,
         page_y: y,
-        screen_x: x,
-        screen_y: y,
+        screen_x: true_x,
+        screen_y: true_y,
         client_x: x,
         client_y: y,
     }
 }
+
 
 fn translate_keyboard_event(event: &keyboard_types::KeyboardEvent) -> Option<UiEvent> {
     let key = convert_key(&event.key);
