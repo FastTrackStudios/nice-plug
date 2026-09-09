@@ -686,6 +686,30 @@ impl HandlerState {
     #[cfg(not(target_os = "macos"))]
     fn poll_macos_geometry(&mut self) {}
 
+    /// Publish whether a text input holds focus, for the editor handle.
+    ///
+    /// The host asks the handle — on the main thread — whether the editor
+    /// wants a key it would otherwise treat as a shortcut, and only this
+    /// thread owns the document that knows. Called after every event AND
+    /// every frame: a field that closes is not actually unmounted until the
+    /// next render, so an event-only update would keep claiming keys for one
+    /// more keystroke after the user finished typing.
+    fn publish_text_input_focus(&mut self) {
+        let Some(doc) = &self.dioxus_doc else {
+            self.dioxus_state.set_text_input_focused(false);
+            return;
+        };
+        let inner = doc.inner();
+        let typing = inner.get_focussed_node_id().is_some_and(|id| {
+            inner
+                .get_node(id)
+                .and_then(|n| n.element_data())
+                .is_some_and(|el| el.text_input_data().is_some())
+        });
+        drop(inner);
+        self.dioxus_state.set_text_input_focused(typing);
+    }
+
     fn on_frame(&mut self, window: &WindowContext) {
         // Initialization needs the window's real physical size and scale. This
         // used to wait for the first `resized()` callback to supply them, which
@@ -938,6 +962,22 @@ impl HandlerState {
         );
         let t_render = t3.elapsed().as_millis();
 
+        // Focus can change without an input event — a field that closed is
+        // only really gone once this render has applied its mutations. `doc`
+        // is already borrowed here, so this is the body of
+        // `publish_text_input_focus` rather than a call to it.
+        {
+            let inner = doc.inner();
+            let typing = inner.get_focussed_node_id().is_some_and(|id| {
+                inner
+                    .get_node(id)
+                    .and_then(|n| n.element_data())
+                    .is_some_and(|el| el.text_input_data().is_some())
+            });
+            drop(inner);
+            self.dioxus_state.set_text_input_focused(typing);
+        }
+
         // FPS + frame timing log (every second)
         self.fps_frame_count += 1;
         let elapsed = self.fps_last_report.elapsed();
@@ -1125,21 +1165,7 @@ impl HandlerState {
                 }
                 doc.handle_ui_event(ui_event);
 
-                // Publish whether a text input now holds focus. The host asks
-                // the editor handle, on the main thread, whether we want a
-                // key it would otherwise treat as a shortcut — and only this
-                // thread owns the document that knows. Recomputed after every
-                // event because a click is what usually changes it.
-                let typing = {
-                    let inner = doc.inner();
-                    inner.get_focussed_node_id().is_some_and(|id| {
-                        inner.get_node(id).and_then(|n| n.element_data()).is_some_and(
-                            |el| el.text_input_data().is_some(),
-                        )
-                    })
-                };
-                self.dioxus_state.set_text_input_focused(typing);
-
+                self.publish_text_input_focus();
                 self.needs_redraw.store(true, Ordering::Relaxed);
                 return EventStatus::Captured;
             }
