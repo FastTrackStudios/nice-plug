@@ -193,6 +193,38 @@ fn translate_keyboard_event(event: &keyboard_types::KeyboardEvent) -> Option<UiE
         text,
     };
 
+    // Backspace on macOS.
+    //
+    // blitz's text input deliberately does NOT handle `Key::Backspace` on
+    // macOS — the arm is `#[cfg(not(target_os = "macos"))]` — because it
+    // expects the platform's own editing command to arrive instead, the way
+    // AppKit produces one through `interpretKeyEvents:` /
+    // `doCommandBySelector:`. baseview hands us raw key events and never
+    // runs that path, so the command never came and backspace did nothing
+    // at all in a plugin editor: not in a DAW, not standalone.
+    //
+    // Synthesising the selector here is the smallest honest fix. It is the
+    // shell's job to speak the platform's editing vocabulary, and this is
+    // the shell.
+    #[cfg(target_os = "macos")]
+    if matches!(
+        event.key,
+        keyboard_types::Key::Named(keyboard_types::NamedKey::Backspace)
+    )
+        && event.state == keyboard_types::KeyState::Down
+    {
+        // The same three the field editor gives you: whole word with Alt,
+        // to the start of the line with Cmd.
+        let selector = if event.modifiers.contains(keyboard_types::Modifiers::META) {
+            "deleteToBeginningOfLine:"
+        } else if event.modifiers.contains(keyboard_types::Modifiers::ALT) {
+            "deleteWordBackward:"
+        } else {
+            "deleteBackward:"
+        };
+        return Some(UiEvent::AppleStandardKeybinding(SmolStr::new(selector)));
+    }
+
     match event.state {
         keyboard_types::KeyState::Down => Some(UiEvent::KeyDown(blitz_event)),
         keyboard_types::KeyState::Up => Some(UiEvent::KeyUp(blitz_event)),
