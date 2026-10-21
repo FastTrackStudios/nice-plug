@@ -304,7 +304,7 @@ impl<P: Vst3Plugin> WrapperView<P> {
     /// If the host supports `IRunLoop`, then this will post the task to a task queue that will be
     /// run on the host's UI thread. If not, then this will return an `Err` value containing the
     /// task so it can be run elsewhere.
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(all(target_family = "unix", not(target_os = "macos"))))]
     pub fn do_maybe_in_run_loop(&self, task: Task<P>) -> Result<(), Task<P>> {
         Err(task)
     }
@@ -353,11 +353,17 @@ impl<P: Vst3Plugin> WrapperView<P> {
 impl<P: Vst3Plugin> RunLoopEventHandler<P> {
     pub fn new(inner: Weak<WrapperInner<P>>, run_loop: ComPtr<IRunLoop>) -> ComWrapper<Self> {
         let mut sockets = [0i32; 2];
+        // iOS (unix, not macOS) has no SOCK_CLOEXEC/SOCK_NONBLOCK; no host
+        // runs a VST3 there, so this only has to build.
+        #[cfg(not(target_vendor = "apple"))]
+        let kind = libc::SOCK_STREAM | libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK;
+        #[cfg(target_vendor = "apple")]
+        let kind = libc::SOCK_STREAM;
         assert_eq!(
             unsafe {
                 libc::socketpair(
                     libc::AF_UNIX,
-                    libc::SOCK_STREAM | libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK,
+                    kind,
                     0,
                     sockets.as_mut_ptr(),
                 )
