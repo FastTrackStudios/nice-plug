@@ -19,17 +19,14 @@ type BlitzLocation = dioxus_native::prelude::Location;
 
 /// Translate a baseview event to a blitz UiEvent.
 ///
-/// `viewport_size` is `(width, height)` in physical pixels. When a mouse button
-/// is held (drag in progress), coordinates are clamped to the viewport so that
-/// Blitz hit-testing still finds the overlay element even when the OS cursor is
-/// outside the plugin window.
+/// `viewport_size` is `(width, height)` in physical pixels.
 /// Where the pointer is, as the translator has to remember it.
 ///
-/// Two positions, because a drag needs both: `clamped` is kept inside the
-/// viewport so Blitz's hit test still finds an element when the cursor has
-/// left the plugin window, and `true_pos` is where the cursor actually is so
-/// the control being dragged keeps moving. Collapsing them — which is what a
-/// bare `(f32, f32)` did — freezes every knob at the edge of the window.
+/// `clamped` was kept inside the viewport so Blitz's hit test still found an
+/// element once the cursor left the plugin window; Blitz now keeps a held
+/// pointer's target out there itself (studio#141), so it is the true
+/// position too, as `true_pos` is. Kept as a pair so the window code that
+/// stores it does not change.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PointerTrack {
     pub clamped: (f32, f32),
@@ -69,33 +66,23 @@ fn translate_mouse_event(
     mouse_pos: &mut PointerTrack,
     mouse_buttons: &mut MouseEventButtons,
     _modifiers: &Modifiers,
-    viewport_size: (u32, u32),
+    _viewport_size: (u32, u32),
 ) -> Option<UiEvent> {
-    // When a mouse button is held, clamp coordinates to the viewport so that
-    // Blitz hit-testing still routes the event to the correct element (e.g. a
-    // full-viewport drag overlay). Without this, out-of-bounds coordinates
-    // cause hit() to return None and the drag event is lost.
-    let clamp = |x: f32, y: f32, buttons: &MouseEventButtons| -> (f32, f32) {
-        if buttons.is_empty() {
-            (x, y)
-        } else {
-            let max_x = (viewport_size.0 as f32 - 1.0).max(0.0);
-            let max_y = (viewport_size.1 as f32 - 1.0).max(0.0);
-            (x.clamp(0.0, max_x), y.clamp(0.0, max_y))
-        }
-    };
-
     match event {
         MouseEvent::CursorMoved {
             position,
             modifiers: mods,
         } => {
+            // Not clamped: Blitz keeps a held pointer's target once it
+            // leaves the window (FastTrackStudios/blitz `fts-pointer-2026-10`,
+            // studio#141), so the true position goes through and a drag past
+            // the edge keeps tracking. Clamping it was the only way to keep
+            // the event alive before, and it pinned every control to the
+            // window's edge.
             let (tx, ty) = (position.x as f32, position.y as f32);
-            let (cx, cy) = clamp(tx, ty, mouse_buttons);
-            mouse_pos.clamped = (cx, cy);
-            // The true position rides along in `screen`, so a drag that runs
-            // past the window edge keeps moving. `mouse_pos` stays clamped
-            // because a later button press has to hit-test somewhere real.
+            mouse_pos.clamped = (tx, ty);
+            // The true position also rides along in `screen`, which
+            // `fts-audio-ui`'s drag layer reads.
             mouse_pos.true_pos = (tx, ty);
             Some(UiEvent::PointerMove(BlitzPointerEvent {
                 id: BlitzPointerId::Mouse,
@@ -193,13 +180,11 @@ fn translate_mouse_event(
 #[inline]
 /// Where the pointer is, for Blitz.
 ///
-/// `client`/`page` are what Blitz hit-tests with, so out-of-window drags
-/// clamp them back inside the viewport (see the caller) or `hit()` returns
-/// `None` and the move is thrown away. `screen` carries the **true** position
-/// instead, unclamped — a drag is measured against the desk, not against the
-/// window it started in, and a control that reads `client` freezes the moment
-/// your hand reaches the edge of the plugin window. `fts-audio-ui`'s drag
-/// layer reads `screen` for exactly this reason.
+/// `client`/`page` are what Blitz hit-tests with; `screen` is the same true
+/// position. They used to differ — `client` clamped to the viewport so an
+/// out-of-window drag still hit something — until Blitz learned to keep a
+/// held pointer's target outside the window (studio#141). `fts-audio-ui`'s
+/// drag layer reads `screen`, which is still right.
 fn pointer_coords_at(x: f32, y: f32, true_x: f32, true_y: f32) -> PointerCoords {
     PointerCoords {
         page_x: x,
