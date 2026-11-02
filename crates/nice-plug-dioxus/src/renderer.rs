@@ -203,7 +203,9 @@ impl Renderer {
         blitter.copy(&wgpu_state.device, &mut encoder, target_view, &surface_view);
 
         wgpu_state.queue.submit(std::iter::once(encoder.finish()));
-        frame.present();
+        // wgpu 30: presenting goes through the queue, after the submit. A
+        // `SurfaceTexture` dropped without this is discarded, not shown.
+        wgpu_state.queue.present(frame);
     }
 
     /// Render the document to an offscreen texture (for softbuffer blit).

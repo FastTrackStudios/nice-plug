@@ -66,6 +66,38 @@ windows = ">=0.59, <=0.62"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["smallvec", "fmt", "tracing-log", "std"] }
 
+# FTS delta: the Dioxus/Blitz forks architect v0.10.0 pins, in the same
+# `[patch]` shape, so nice-plug-dioxus builds here against exactly what a
+# consuming workspace (studio) resolves. Patches in a dependency's workspace do
+# not reach its consumers, so each consumer carries these too. Keep them in
+# lockstep with architect's Cargo.toml.
+[patch.crates-io]
+# Blitz from the FTS fork (DioxusLabs/blitz main 0.3.0-beta.4 + the FTS
+# changes), one tag across every blitz crate and anyrender 0.14.
+blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11" }
+blitz-traits = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11" }
+blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11" }
+blitz-shell = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11" }
+blitz-net = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11" }
+blitz-html = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11" }
+anyrender = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11" }
+# Renderer/windowing forks from FastTrackStudios/vendor (each one's reason is
+# in vendor's README): Vello's window renderer and compositor, the hybrid
+# renderer, winit's UIKit backend, wgpu's Metal layer.
+anyrender_vello = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
+anyrender_vello_hybrid = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
+winit-uikit = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
+wgpu-hal = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
+raw-window-metal = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
+
+# The Dioxus crates from the FTS vendor fork (each one's reason is in its
+# UPSTREAM.md): dioxus-native, dioxus-native-dom, dioxus-vdom (upstream's
+# renamed dioxus-core).
+[patch."https://github.com/DioxusLabs/dioxus"]
+dioxus-native = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
+dioxus-native-dom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
+dioxus-vdom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
+
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]
 opt-level = 1

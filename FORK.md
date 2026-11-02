@@ -26,6 +26,13 @@ now shares the same crates.io baseview.
   standalone windows via `open_standalone_with_state`), ported to
   baseview 0.3 and the reworked `Editor`/`EditorHandle` split.
   `DioxusState::with_resize_hint` opts an editor into host resizing.
+  Its Dioxus/Blitz/Vello/wgpu pins follow architect's (currently
+  architect v0.10.0: Dioxus `430cfb56`, Blitz `=0.3.0-beta.4`, vello 0.11,
+  wgpu 30, anyrender 0.14). The root `Cargo.toml`'s `[patch]` sections
+  repeat architect's fork patches (FastTrackStudios/blitz
+  `fts-upstream-2026-11`, FastTrackStudios/vendor `v0.7.0`) so this
+  workspace builds against exactly what a consumer resolves; consumers
+  carry the same patches themselves.
 - **Embedded editor API** (`nice-plug-core/src/editor/embedded.rs`) +
   REAPER inline FX UI (`cockos.reaper_embedui`) CLAP extension.
 - **Rich `GuiContext::track_info()`** (name/color/channels/bus flags,

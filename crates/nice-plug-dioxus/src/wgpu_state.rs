@@ -119,6 +119,8 @@ impl WgpuState {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 force_fallback_adapter: false,
                 compatible_surface: Some(&surface),
+                // New in wgpu 30; `false` is the default (no limit bucketing).
+                apply_limit_buckets: false,
             })
             .block_on()
             .expect("Failed to find an appropriate adapter");
@@ -214,6 +216,9 @@ impl WgpuState {
             present_mode,
             alpha_mode,
             view_formats: vec![],
+            // New in wgpu 30: `Auto` is the default and what every format
+            // supports — the surface keeps its platform colour space, as before.
+            color_space: wgpu::SurfaceColorSpace::Auto,
             desired_maximum_frame_latency: 2,
         };
 

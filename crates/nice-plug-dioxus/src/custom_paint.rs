@@ -40,7 +40,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use dioxus_native::prelude::dioxus_core::use_hook_with_cleanup;
+use dioxus_native::prelude::dioxus_vdom::use_hook_with_cleanup;
 use dioxus_native::prelude::*;
 use vello::kurbo::{Affine, Rect};
 use vello::peniko::Fill;

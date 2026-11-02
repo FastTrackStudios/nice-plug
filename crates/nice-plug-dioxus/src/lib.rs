@@ -73,17 +73,23 @@ use dioxus_native::prelude::Element;
 // Re-export dioxus_native for convenience
 pub use dioxus_native;
 
-// Re-export individual dioxus crates for more specific imports
-pub use dioxus_native::prelude::dioxus_core;
-pub use dioxus_native::prelude::dioxus_elements;
+// Re-export individual dioxus crates for more specific imports.
+//
+// Dioxus 0.8 renamed `dioxus-core` to `dioxus-vdom`; `dioxus_core` stays as an
+// alias of it so existing `nice_plug_dioxus::dioxus_core::…` paths keep
+// resolving. The `dioxus_elements` module is gone upstream: the element
+// vocabulary now lives in `dioxus_html` (`html::div`, …).
 pub use dioxus_native::prelude::dioxus_signals;
+pub use dioxus_native::prelude::dioxus_vdom;
+pub use dioxus_native::prelude::dioxus_vdom as dioxus_core;
 pub use dioxus_native::prelude::document;
+pub use dioxus_native::prelude::{dioxus_html, html};
 
 // Re-export wgpu so consumers share this crate's exact version.
 pub use wgpu;
 
 /// Custom-paint `<canvas>` support for the standalone / dx-serve path, using
-/// anyrender 0.10's texture-registration model.
+/// anyrender's texture-registration model.
 ///
 /// To back a `<canvas src="{id}">` with GPU content: pull the active
 /// [`DioxusNativeWindowRenderer`] from Dioxus context, obtain its

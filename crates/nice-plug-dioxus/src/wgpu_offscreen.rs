@@ -44,6 +44,8 @@ impl WgpuOffscreenState {
                 power_preference: wgpu::PowerPreference::LowPower,
                 force_fallback_adapter: false,
                 compatible_surface: None, // No surface!
+                // New in wgpu 30; `false` is the default (no limit bucketing).
+                apply_limit_buckets: false,
             })
             .block_on()
             .expect("Failed to find an appropriate adapter");
@@ -222,7 +224,11 @@ impl WgpuOffscreenState {
         let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
         rx.recv().unwrap().unwrap();
 
-        let data = buffer_slice.get_mapped_range();
+        // wgpu 30: a mapped range is a `Result`; the map above succeeded, so
+        // this only fails on a range bug here.
+        let data = buffer_slice
+            .get_mapped_range()
+            .expect("staging buffer is mapped for its whole range");
 
         // Remove padding if necessary
         let result = if padded_bytes_per_row != unpadded_bytes_per_row {
