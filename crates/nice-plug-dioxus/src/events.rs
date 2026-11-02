@@ -286,7 +286,9 @@ fn convert_key(key: &keyboard_types::Key) -> BlitzKey {
         keyboard_types::Key::Character(s) => BlitzKey::Character(s.to_string()),
         other => {
             let s = other.to_string();
-            s.parse::<BlitzKey>().unwrap_or(BlitzKey::Unidentified)
+            s.parse::<BlitzKey>().unwrap_or(BlitzKey::Named(
+                dioxus_native::prelude::NamedKey::Unidentified,
+            ))
         }
     }
 }

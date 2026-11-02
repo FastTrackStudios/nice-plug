@@ -531,7 +531,11 @@ pub fn render_screenshot(
     let _ = device.poll(wgpu::PollType::wait_indefinitely());
     rx.recv().unwrap().unwrap();
 
-    let data = slice.get_mapped_range();
+    // wgpu 30: a mapped range is a `Result`; the map above succeeded, so
+    // this only fails on a range bug here.
+    let data = slice
+        .get_mapped_range()
+        .expect("readback buffer is mapped for its whole range");
     let result = if padded_bpr != unpadded_bpr {
         let mut out = Vec::with_capacity((width * height * 4) as usize);
         for y in 0..height {

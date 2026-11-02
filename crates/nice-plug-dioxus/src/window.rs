@@ -1143,9 +1143,7 @@ impl HandlerState {
                                     let class = node
                                         .element_data()
                                         .and_then(|ed| {
-                                            ed.attrs()
-                                                .iter()
-                                                .find(|a| a.name.local.as_ref() == "class")
+                                            ed.attrs().iter().find(|a| &*a.name.local == "class")
                                         })
                                         .map(|a| a.value.chars().take(30).collect::<String>())
                                         .unwrap_or_default();
