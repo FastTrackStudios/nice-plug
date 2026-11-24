@@ -72,6 +72,26 @@ pub trait ClapPlugin: Plugin {
     }
 }
 
+/// Ask the host behind `plugin` to read its parameters again: their info and
+/// text (`info`: a parameter renamed, as a slot is when the algorithm behind
+/// it changes) and their values (`values`). From any thread. FTS delta.
+///
+/// # Safety
+///
+/// `plugin` must be a `clap_plugin` nice-plug created for plugin type `P`, still alive.
+pub unsafe fn clap_request_rescan<P: ClapPlugin>(plugin: *const clap_plugin, info: bool, values: bool) {
+    if plugin.is_null() {
+        return;
+    }
+    // SAFETY: the caller's contract.
+    let data = unsafe { (*plugin).plugin_data };
+    if data.is_null() {
+        return;
+    }
+    let wrapper = unsafe { &*(data as *const Wrapper<P>) };
+    wrapper.request_param_rescan(info, values);
+}
+
 /// The CLAP parameter id nice-plug gives the parameter with string id `id`:
 /// what a custom extension maps a host's `clap_id` back to a parameter
 /// with (FTS delta).

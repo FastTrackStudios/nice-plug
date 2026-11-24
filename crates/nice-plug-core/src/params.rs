@@ -37,6 +37,10 @@ struct ParamInfo<T> {
     flags: ParamFlags,
     /// The parameter's human-readable display name.
     name: String,
+    /// A name that can change while the plugin runs (FTS delta): asked for
+    /// whenever the host reads the parameter's info. A plugin that changes
+    /// it asks the host to rescan (`clap_request_rescan`).
+    dynamic_name: Option<Arc<dyn Fn() -> String + Send + Sync>>,
     /// The parameter value's unit. This is appended after `value_to_string`, when set, without
     /// automatically inserting a space.
     unit: &'static str,
@@ -52,6 +56,7 @@ impl<T> ParamInfo<T> {
         Self {
             flags: ParamFlags::default(),
             name: name.into(),
+            dynamic_name: None,
             unit: "",
             value_to_string: None,
             string_to_value: None,
@@ -109,6 +114,13 @@ pub trait Param: Display + Debug + sealed::Sealed {
 
     /// Get the human readable name for this parameter.
     fn name(&self) -> &str;
+
+    /// The name as it is right now, when it can change while the plugin
+    /// runs (a slot whose meaning follows the loaded algorithm). Hosts are
+    /// told this one; `None` means [`name()`][Self::name()]. FTS delta.
+    fn dynamic_name(&self) -> Option<String> {
+        None
+    }
 
     /// Get the unit label for this parameter, if any.
     fn unit(&self) -> &'static str;

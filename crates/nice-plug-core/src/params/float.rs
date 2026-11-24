@@ -95,6 +95,10 @@ impl Param for FloatParam {
         &self.info.name
     }
 
+    fn dynamic_name(&self) -> Option<String> {
+        self.info.dynamic_name.as_ref().map(|f| f())
+    }
+
     fn unit(&self) -> &'static str {
         self.info.unit
     }
@@ -352,6 +356,15 @@ impl FloatParam {
     /// number.
     pub fn with_step_size(mut self, step_size: f32) -> Self {
         self.step_size = Some(step_size);
+        self
+    }
+
+    /// A name that can change while the plugin runs: `name` is called each
+    /// time the host reads the parameter's info. After it changes, ask the
+    /// host to rescan (`nice_plug::wrapper::clap::clap_request_rescan`).
+    /// FTS delta.
+    pub fn with_dynamic_name(mut self, name: Arc<dyn Fn() -> String + Send + Sync>) -> Self {
+        self.info.dynamic_name = Some(name);
         self
     }
 

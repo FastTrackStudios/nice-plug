@@ -666,8 +666,10 @@ impl<P: Vst3Plugin> IEditControllerTrait for Wrapper<P> {
             let is_bypass = flags.contains(ParamFlags::BYPASS);
 
             info.id = *param_hash;
-            u16strlcpy(&mut info.title, unsafe { param_ptr.name() });
-            u16strlcpy(&mut info.shortTitle, unsafe { param_ptr.name() });
+            let dynamic = unsafe { param_ptr.dynamic_name() };
+            let name = dynamic.as_deref().unwrap_or(unsafe { param_ptr.name() });
+            u16strlcpy(&mut info.title, name);
+            u16strlcpy(&mut info.shortTitle, name);
             u16strlcpy(&mut info.units, unsafe { param_ptr.unit() });
             info.stepCount = unsafe { param_ptr.step_count().unwrap_or(0) } as i32;
             info.defaultNormalizedValue = default_value as f64;

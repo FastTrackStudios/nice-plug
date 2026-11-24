@@ -64,6 +64,7 @@ macro_rules! param_ptr_forward(
 
 impl ParamPtr {
     param_ptr_forward!(pub unsafe fn name(&self) -> &str);
+    param_ptr_forward!(pub unsafe fn dynamic_name(&self) -> Option<String>);
     param_ptr_forward!(pub unsafe fn unit(&self) -> &'static str);
     param_ptr_forward!(pub unsafe fn poly_modulation_id(&self) -> Option<u32>);
     param_ptr_forward!(pub unsafe fn modulated_normalized_value(&self) -> f32);
