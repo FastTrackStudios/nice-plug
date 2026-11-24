@@ -24,6 +24,7 @@ use clap_sys::ext::gui::CLAP_EXT_GUI;
 #[cfg(feature = "editor")]
 use clap_sys::ext::gui::{clap_host_gui, clap_plugin_gui};
 use clap_sys::ext::latency::{CLAP_EXT_LATENCY, clap_host_latency, clap_plugin_latency};
+use clap_sys::ext::note_name::{CLAP_EXT_NOTE_NAME, clap_note_name, clap_plugin_note_name};
 use clap_sys::ext::note_ports::{
     CLAP_EXT_NOTE_PORTS, CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_DIALECT_MIDI, clap_note_port_info,
     clap_plugin_note_ports,
@@ -50,8 +51,6 @@ use clap_sys::ext::track_info::{
     CLAP_TRACK_INFO_HAS_TRACK_COLOR, CLAP_TRACK_INFO_HAS_TRACK_NAME, clap_host_track_info,
     clap_plugin_track_info, clap_track_info,
 };
-use clap_sys::ext::note_name::{CLAP_EXT_NOTE_NAME, clap_note_name, clap_plugin_note_name};
-use clap_sys::string_sizes::CLAP_NAME_SIZE;
 use clap_sys::ext::voice_info::{
     CLAP_EXT_VOICE_INFO, CLAP_VOICE_INFO_SUPPORTS_OVERLAPPING_NOTES, clap_host_voice_info,
     clap_plugin_voice_info, clap_voice_info,
@@ -65,6 +64,7 @@ use clap_sys::process::{
     clap_process_status,
 };
 use clap_sys::stream::{clap_istream, clap_ostream};
+use clap_sys::string_sizes::CLAP_NAME_SIZE;
 use crossbeam::atomic::AtomicCell;
 use crossbeam::channel::{self, SendTimeoutError};
 use crossbeam::queue::ArrayQueue;
@@ -99,7 +99,7 @@ use try_lock::TryLock;
 use super::context::{WrapperActivateContext, WrapperProcessContext};
 use super::descriptor::PluginDescriptor;
 use super::reaper_embed::{
-    handle_embed_message, ClapPluginReaperEmbedUi, CLAP_EXT_REAPER_EMBED_UI,
+    CLAP_EXT_REAPER_EMBED_UI, ClapPluginReaperEmbedUi, handle_embed_message,
 };
 use super::util::ClapPtr;
 use crate::event_loop::{BackgroundThread, EventLoop, MainThreadExecutor, TASK_QUEUE_CAPACITY};
@@ -129,6 +129,8 @@ pub struct Wrapper<P: ClapPlugin> {
 
     /// The wrapped plugin instance.
     plugin: TryLock<P>,
+    /// What [`ClapPlugin::clap_extension`]'s vtables run against (FTS delta).
+    extension_state: Option<Arc<dyn std::any::Any + Send + Sync>>,
     /// The plugin's background task executor closure.
     pub task_executor: Mutex<TaskExecutor<P>>,
     /// The plugin's parameters. These are fetched once during initialization. That way the
@@ -636,9 +638,11 @@ impl<P: ClapPlugin> Wrapper<P> {
             &param_ptr_to_hash,
         );
 
+        let extension_state = plugin.extension_state();
         let wrapper = Self {
             this: AtomicRefCell::new(Weak::new()),
 
+            extension_state,
             plugin: TryLock::new(plugin),
             task_executor,
             params,
@@ -2455,10 +2459,18 @@ impl<P: ClapPlugin> Wrapper<P> {
             // Only advertise REAPER's embedded UI extension when the plugin
             // actually has an embedded editor.
             &wrapper.clap_plugin_reaper_embed_ui as *const _ as *const c_void
+        } else if let Some(vtable) = P::clap_extension(id) {
+            // A custom extension the plugin implements (FTS delta).
+            vtable
         } else {
             crate::nice_trace!("Host tried to query unknown extension {:?}", id);
             std::ptr::null()
         }
+    }
+
+    /// See [`ClapPlugin::extension_state`] (FTS delta).
+    pub fn extension_state(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        self.extension_state.clone()
     }
 
     /// REAPER's embedded UI extension callback.
@@ -2887,14 +2899,11 @@ impl<P: ClapPlugin> Wrapper<P> {
                             }
                         }
                     }
-
                 }
-
 
                 // Only the weak wrapper handle crosses threads here, and
                 // `request_callback` is documented thread-safe: it exists so
                 // other threads can ask for main-thread time.
-
 
                 let callbacks: Box<dyn HostCallbacks> = Box::new(ClapHostCallbacks {
                     wrapper: wrapper.this.borrow().clone(),
@@ -3726,10 +3735,6 @@ impl<P: ClapPlugin> Wrapper<P> {
             None => false,
         }
     }
-
-
-
-
 }
 
 /// Convenience function to query an extension from the host.
