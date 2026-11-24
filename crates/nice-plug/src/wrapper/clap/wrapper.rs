@@ -1781,6 +1781,12 @@ impl<P: ClapPlugin> Wrapper<P> {
         #[cfg(feature = "editor")]
         wrapper.update_track_info_from_host();
 
+        // FTS delta: the plugin's own pointers, for its custom extensions.
+        if let Some(state) = wrapper.extension_state() {
+            let host: *const clap_host = &*wrapper.host_callback;
+            P::clap_init(&state, plugin, host);
+        }
+
         true
     }
 
