@@ -1,4 +1,7 @@
-use nice_plug::prelude::*;
+use nice_plug::{
+    midi::{Channel, Key},
+    prelude::*,
+};
 use std::sync::Arc;
 
 /// A plugin that inverts all MIDI note numbers, channels, CCs, velocities, pressures, and
@@ -49,6 +52,19 @@ impl Plugin for MidiInverter {
         _aux: &mut AuxiliaryBuffers,
         context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        fn reverse_channel(channel: Channel) -> Channel {
+            match channel {
+                Channel::Number(c) => Channel::Number(15u8.saturating_sub(c)),
+                Channel::Wildcard => Channel::Wildcard,
+            }
+        }
+        fn reverse_key(key: Key) -> Key {
+            match key {
+                Key::Number(k) => Key::Number(127u8.saturating_sub(k)),
+                Key::Wildcard => Key::Wildcard,
+            }
+        }
+
         // We'll invert the channel, note index, velocity, pressure, CC value, pitch bend, and
         // anything else that is invertable for all events we receive
         while let Some(event) = context.next_event() {
@@ -57,160 +73,186 @@ impl Plugin for MidiInverter {
                     timing,
                     voice_id,
                     channel,
-                    note,
+                    key,
                     velocity,
-                } => context.send_event(NoteEvent::NoteOn {
-                    timing,
-                    voice_id,
-                    channel: 15 - channel,
-                    note: 127 - note,
-                    velocity: 1.0 - velocity,
-                }),
+                } => {
+                    let _ = context.try_send_event(NoteEvent::NoteOn {
+                        timing,
+                        voice_id,
+                        channel: reverse_channel(channel),
+                        key: reverse_key(key),
+                        velocity: 1.0 - velocity,
+                    });
+                }
                 NoteEvent::NoteOff {
                     timing,
                     voice_id,
                     channel,
-                    note,
+                    key,
                     velocity,
-                } => context.send_event(NoteEvent::NoteOff {
-                    timing,
-                    voice_id,
-                    channel: 15 - channel,
-                    note: 127 - note,
-                    velocity: 1.0 - velocity,
-                }),
+                } => {
+                    let _ = context.try_send_event(NoteEvent::NoteOff {
+                        timing,
+                        voice_id,
+                        channel: reverse_channel(channel),
+                        key: reverse_key(key),
+                        velocity: 1.0 - velocity,
+                    });
+                }
                 NoteEvent::Choke {
                     timing,
                     voice_id,
                     channel,
-                    note,
-                } => context.send_event(NoteEvent::Choke {
-                    timing,
-                    voice_id,
-                    channel: 15 - channel,
-                    note: 127 - note,
-                }),
+                    key,
+                } => {
+                    let _ = context.try_send_event(NoteEvent::Choke {
+                        timing,
+                        voice_id,
+                        channel: reverse_channel(channel),
+                        key: reverse_key(key),
+                    });
+                }
                 NoteEvent::PolyPressure {
                     timing,
                     voice_id,
                     channel,
-                    note,
+                    key,
                     pressure,
-                } => context.send_event(NoteEvent::PolyPressure {
-                    timing,
-                    voice_id,
-                    channel: 15 - channel,
-                    note: 127 - note,
-                    pressure: 1.0 - pressure,
-                }),
+                } => {
+                    let _ = context.try_send_event(NoteEvent::PolyPressure {
+                        timing,
+                        voice_id,
+                        channel: reverse_channel(channel),
+                        key: reverse_key(key),
+                        pressure: 1.0 - pressure,
+                    });
+                }
                 NoteEvent::PolyVolume {
                     timing,
                     voice_id,
                     channel,
-                    note,
+                    key,
                     gain,
-                } => context.send_event(NoteEvent::PolyVolume {
-                    timing,
-                    voice_id,
-                    channel: 15 - channel,
-                    note: 127 - note,
-                    gain: 1.0 - gain,
-                }),
+                } => {
+                    let _ = context.try_send_event(NoteEvent::PolyVolume {
+                        timing,
+                        voice_id,
+                        channel: reverse_channel(channel),
+                        key: reverse_key(key),
+                        gain: 1.0 - gain,
+                    });
+                }
                 NoteEvent::PolyPan {
                     timing,
                     voice_id,
                     channel,
-                    note,
+                    key,
                     pan,
-                } => context.send_event(NoteEvent::PolyPan {
-                    timing,
-                    voice_id,
-                    channel: 15 - channel,
-                    note: 127 - note,
-                    pan: 1.0 - pan,
-                }),
+                } => {
+                    let _ = context.try_send_event(NoteEvent::PolyPan {
+                        timing,
+                        voice_id,
+                        channel: reverse_channel(channel),
+                        key: reverse_key(key),
+                        pan: 1.0 - pan,
+                    });
+                }
                 NoteEvent::PolyTuning {
                     timing,
                     voice_id,
                     channel,
-                    note,
+                    key,
                     tuning,
-                } => context.send_event(NoteEvent::PolyTuning {
-                    timing,
-                    voice_id,
-                    channel: 15 - channel,
-                    note: 127 - note,
-                    tuning: 1.0 - tuning,
-                }),
+                } => {
+                    let _ = context.try_send_event(NoteEvent::PolyTuning {
+                        timing,
+                        voice_id,
+                        channel: reverse_channel(channel),
+                        key: reverse_key(key),
+                        tuning: 1.0 - tuning,
+                    });
+                }
                 NoteEvent::PolyVibrato {
                     timing,
                     voice_id,
                     channel,
-                    note,
+                    key,
                     vibrato,
-                } => context.send_event(NoteEvent::PolyVibrato {
-                    timing,
-                    voice_id,
-                    channel: 15 - channel,
-                    note: 127 - note,
-                    vibrato: 1.0 - vibrato,
-                }),
+                } => {
+                    let _ = context.try_send_event(NoteEvent::PolyVibrato {
+                        timing,
+                        voice_id,
+                        channel: reverse_channel(channel),
+                        key: reverse_key(key),
+                        vibrato: 1.0 - vibrato,
+                    });
+                }
                 NoteEvent::PolyExpression {
                     timing,
                     voice_id,
                     channel,
-                    note,
+                    key,
                     expression,
-                } => context.send_event(NoteEvent::PolyExpression {
-                    timing,
-                    voice_id,
-                    channel: 15 - channel,
-                    note: 127 - note,
-                    expression: 1.0 - expression,
-                }),
+                } => {
+                    let _ = context.try_send_event(NoteEvent::PolyExpression {
+                        timing,
+                        voice_id,
+                        channel: reverse_channel(channel),
+                        key: reverse_key(key),
+                        expression: 1.0 - expression,
+                    });
+                }
                 NoteEvent::PolyBrightness {
                     timing,
                     voice_id,
                     channel,
-                    note,
+                    key,
                     brightness,
-                } => context.send_event(NoteEvent::PolyBrightness {
-                    timing,
-                    voice_id,
-                    channel: 15 - channel,
-                    note: 127 - note,
-                    brightness: 1.0 - brightness,
-                }),
+                } => {
+                    let _ = context.try_send_event(NoteEvent::PolyBrightness {
+                        timing,
+                        voice_id,
+                        channel: reverse_channel(channel),
+                        key: reverse_key(key),
+                        brightness: 1.0 - brightness,
+                    });
+                }
                 NoteEvent::MidiChannelPressure {
                     timing,
                     channel,
                     pressure,
-                } => context.send_event(NoteEvent::MidiChannelPressure {
-                    timing,
-                    channel: 15 - channel,
-                    pressure: 1.0 - pressure,
-                }),
+                } => {
+                    let _ = context.try_send_event(NoteEvent::MidiChannelPressure {
+                        timing,
+                        channel: 15u8.saturating_sub(channel),
+                        pressure: 1.0 - pressure,
+                    });
+                }
                 NoteEvent::MidiPitchBend {
                     timing,
                     channel,
                     value,
-                } => context.send_event(NoteEvent::MidiPitchBend {
-                    timing,
-                    channel: 15 - channel,
-                    value: 1.0 - value,
-                }),
+                } => {
+                    let _ = context.try_send_event(NoteEvent::MidiPitchBend {
+                        timing,
+                        channel: 15u8.saturating_sub(channel),
+                        value: 1.0 - value,
+                    });
+                }
                 NoteEvent::MidiCC {
                     timing,
                     channel,
                     cc,
                     value,
-                } => context.send_event(NoteEvent::MidiCC {
-                    timing,
-                    channel: 15 - channel,
-                    // The one thing we won't invert, because uuhhhh
-                    cc,
-                    value: 1.0 - value,
-                }),
+                } => {
+                    let _ = context.try_send_event(NoteEvent::MidiCC {
+                        timing,
+                        channel: 15u8.saturating_sub(channel),
+                        // The one thing we won't invert, because uuhhhh
+                        cc,
+                        value: 1.0 - value,
+                    });
+                }
                 _ => (),
             }
         }

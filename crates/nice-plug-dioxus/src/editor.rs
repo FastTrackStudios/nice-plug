@@ -9,7 +9,7 @@ use crate::SharedState;
 use crossbeam::atomic::AtomicCell;
 use dioxus_native::prelude::Element;
 use nice_plug_core::context::gui::GuiContext;
-use nice_plug_core::editor::dpi::{LogicalSize, PhysicalSize};
+use nice_plug_core::editor::dpi::{LogicalSize, NativeSize, PhysicalSize, Size};
 use nice_plug_core::editor::{
     Editor, EditorHandle, HostMethods, Modifiers, ParentWindowHandle, ResizeHint, SpawnedEditor,
     VirtualKeyCode,
@@ -193,21 +193,13 @@ impl Editor for DioxusEditor {
 
     /// The editor size in the unit the platform's GUI API uses.
     ///
-    /// The return type says physical, and on X11 and Win32 it is. macOS is the
-    /// exception: cocoa — and therefore CLAP and VST3 on macOS — is defined in
-    /// LOGICAL pixels, so scaling up here reports a Retina host a window twice
-    /// as large in each dimension as the editor wants, and the editor then
-    /// paints its real size into a quarter of the window it is given.
-    ///
-    /// The size is stored logical either way; the only question is whether to
-    /// scale it on the way out.
-    fn size(&self) -> PhysicalSize<u32> {
+    /// The editor's size in the platform GUI API's unit ([`NativeSize`]):
+    /// logical pixels on macOS (cocoa, and so CLAP and VST3 there), physical
+    /// on X11 and Win32. The size is stored logical; only the way out scales.
+    fn size(&self) -> NativeSize<u32> {
         let (width, height) = self.state.scaled_logical_size();
-        if cfg!(target_os = "macos") {
-            return PhysicalSize::new(width, height);
-        }
         let scale = self.scaling_factor.load().unwrap_or(1.0) as f64;
-        LogicalSize::new(width as f64, height as f64).to_physical(scale)
+        NativeSize::from_size(Size::Logical(LogicalSize::new(width as f64, height as f64)), scale)
     }
 
     fn resize_hint(&self) -> ResizeHint {
@@ -326,24 +318,15 @@ impl EditorHandle for DioxusEditorHandle {
     /// match.
     fn set_size(
         &self,
-        new_size: PhysicalSize<u32>,
+        new_size: NativeSize<u32>,
         window: &Self::Window,
     ) -> Result<(), Self::Error> {
         let current = window.size();
-
-        // Mirror of `size()`: the host speaks the platform GUI API's unit, so
-        // on macOS these numbers are already LOGICAL and converting them again
-        // halves the editor on a 2x display. Everywhere else they are physical.
-        let (physical, logical) = if cfg!(target_os = "macos") {
-            let logical = LogicalSize::new(new_size.width as f64, new_size.height as f64);
-            (logical.to_physical(current.scale_factor), logical)
-        } else {
-            (new_size, new_size.to_logical(current.scale_factor))
-        };
+        let (_, logical) = native_to_sizes(new_size, current.scale_factor);
 
         if !self.state.resize_hint().is_size_valid(
-            physical,
-            current.physical,
+            new_size,
+            native_of(current.physical, current.scale_factor),
             current.scale_factor,
         ) {
             // `baseview::Error` is opaque; a handler error is the documented
@@ -377,13 +360,13 @@ impl EditorHandle for DioxusEditorHandle {
 
     fn adjust_size(
         &self,
-        new_size: PhysicalSize<u32>,
+        new_size: NativeSize<u32>,
         window: &Self::Window,
-    ) -> Option<PhysicalSize<u32>> {
+    ) -> Option<NativeSize<u32>> {
         let current = window.size();
         Some(self.state.resize_hint().adjust_size(
             new_size,
-            current.physical,
+            native_of(current.physical, current.scale_factor),
             current.scale_factor,
         ))
     }
@@ -481,4 +464,20 @@ impl raw_window_handle::HasDisplayHandle for RwhAdapter {
         // Safety: The handle is valid for the lifetime of the adapter
         Ok(unsafe { raw_window_handle::DisplayHandle::borrow_raw(raw) })
     }
+}
+
+/// A native size (the platform GUI API's unit) as physical and logical pixels.
+fn native_to_sizes(native: NativeSize<u32>, scale_factor: f64) -> (PhysicalSize<u32>, LogicalSize<f64>) {
+    if cfg!(target_os = "macos") {
+        let logical = LogicalSize::new(native.width as f64, native.height as f64);
+        (logical.to_physical(scale_factor), logical)
+    } else {
+        let physical = PhysicalSize::new(native.width, native.height);
+        (physical, physical.to_logical(scale_factor))
+    }
+}
+
+/// A window's physical size in the platform GUI API's unit.
+fn native_of(physical: PhysicalSize<u32>, scale_factor: f64) -> NativeSize<u32> {
+    NativeSize::from_logical_or_physical(physical.to_logical(scale_factor), physical)
 }

@@ -1,6 +1,6 @@
 [package]
 name = "nice-plug-core"
-version = "0.3.0"
+version = "0.4.2"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -9,7 +9,6 @@ repository.workspace = true
 description = "Core types and traits used in the nice-plug plugin framework"
 keywords = ["plugin", "clap", "vst3"]
 categories = ["multimedia::audio"]
-readme = "README.md"
 
 # Show documentation with all features enabled on docs.rs
 [package.metadata.docs.rs]
@@ -38,9 +37,10 @@ serde.workspace = true
 serde_json.workspace = true
 parking_lot.workspace = true
 atomic_refcell.workspace = true
+raw-window-handle.workspace = true
+thiserror.workspace = true
 crossbeam-utils = "0.8.21"
 midi-consts = "0.1"
-raw-window-handle.workspace = true
 dpi = { version = "0.1.2", optional = true }
 
 [dev-dependencies]
