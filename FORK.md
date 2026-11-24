@@ -3,9 +3,10 @@
 Fork of [RustAudio/nice-plug](https://codeberg.org/RustAudio/nice-plug)
 carrying the FastTrackStudio additions.
 
-**Base: upstream's `baseview-03` branch** (upstream `main` + the big
-editor-API rework + baseview host callbacks for CLAP and VST3), not
-upstream `main`.
+**Base: upstream `main`** (0.4.2, which has merged the `baseview-03`
+editor rework, `NativeSize`, the event-handling rework with wildcard
+`Key`/`Channel`/`VoiceID`, and the CLAP block-splitting fix #91).
+Forwarded from the `baseview-03` base in November 2026.
 
 ## Why baseview 0.3
 
@@ -51,9 +52,10 @@ build anywhere but their machine:
 - `nice-plug-egui` pointed `egui-baseview` at a sibling checkout
   (`../../../egui-baseview`). Repointed at that repo's matching
   `baseview-03` branch. Revert to a released version once one exists.
-- `nice-plug-iced` was not ported to the reworked `Editor` trait and does
-  not compile. Excluded from the workspace — FTS ships the dioxus backend
-  and has no way to test iced. Restore when upstream ports it.
+- `nice-plug-iced`: upstream has since ported it to the reworked
+  `Editor` trait, and it builds again.
+- The fork's macOS GUI-size fix (CLAP sizes are logical pixels on cocoa)
+  is upstream's `NativeSize` now; the fork's hand-rolled version is gone.
 
 ## Status
 

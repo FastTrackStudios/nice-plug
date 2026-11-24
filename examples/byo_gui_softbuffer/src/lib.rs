@@ -1,13 +1,10 @@
 //! This plugin demonstrates how to "bring your own GUI toolkit" using a raw Softbuffer rendering context.
 
-use baseview::{
-    HandlerError, WindowContext, WindowSettings,
-    dpi::{LogicalSize, PhysicalSize},
-};
+use baseview::{HandlerError, WindowContext, WindowSettings, dpi::LogicalSize};
 use crossbeam::atomic::AtomicCell;
 use nice_plug::{
     context::gui::GuiContext,
-    editor::{EditorHandle, HostMethods, SpawnedEditor},
+    editor::{EditorHandle, HostMethods, SpawnedEditor, dpi::NativeSize},
     prelude::*,
 };
 use softbuffer::SoftBufferError;
@@ -18,6 +15,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+    time::Duration,
 };
 
 const MIN_SIZE: LogicalSize<f32> = LogicalSize::new(200.0, 150.0);
@@ -25,7 +23,8 @@ const RESIZE_HINT: ResizeHint = ResizeHint::resizable().with_min_logical_size(MI
 
 pub struct SoftbufferWindow {
     _gui_context: GuiContext,
-    _window: WindowContext,
+    window: WindowContext,
+    poll_timer_handle: baseview::TimerHandle,
 
     surface: RefCell<Surface>,
 
@@ -47,6 +46,7 @@ impl SoftbufferWindow {
         params: Arc<MyPluginParams>,
         editor_state: Arc<SoftbufferEditorState>,
         redraw_requested: Arc<AtomicBool>,
+        poll_timer_handle: baseview::TimerHandle,
     ) -> Result<Self, SoftBufferError> {
         let size = window.size();
 
@@ -60,7 +60,7 @@ impl SoftbufferWindow {
 
         Ok(Self {
             _gui_context: gui_context,
-            _window: window,
+            window,
             surface: RefCell::new(Surface {
                 _sb_context: sb_context,
                 sb_surface,
@@ -68,16 +68,19 @@ impl SoftbufferWindow {
             params,
             editor_state,
             redraw_requested,
+            poll_timer_handle,
         })
     }
 }
 
 impl baseview::WindowHandler for SoftbufferWindow {
-    fn on_frame(&self) -> Result<(), HandlerError> {
-        if !self.redraw_requested.swap(false, Ordering::Relaxed) {
-            return Ok(());
+    fn poll(&self) {
+        if self.redraw_requested.swap(false, Ordering::Relaxed) {
+            self.window.request_redraw();
         }
+    }
 
+    fn draw(&self) -> Result<(), HandlerError> {
         // Do rendering here.
 
         let mut surface = self.surface.borrow_mut();
@@ -141,6 +144,12 @@ impl baseview::WindowHandler for SoftbufferWindow {
         self.redraw_requested.store(true, Ordering::Relaxed);
 
         Ok(())
+    }
+
+    fn on_timer(&self, timer: &baseview::TimerHandle) {
+        if timer == self.poll_timer_handle {
+            self.poll();
+        }
     }
 }
 
@@ -222,12 +231,15 @@ impl Editor for SoftbufferEditor {
             move |window: WindowContext| -> Result<SoftbufferWindow, HandlerError> {
                 editor_state.scale_factor.store(window.size().scale_factor);
 
+                let poll_timer_handle = window.create_timer(Duration::from_secs_f64(1.0 / 64.0))?;
+
                 SoftbufferWindow::new(
                     window,
                     gui_context,
                     params,
                     editor_state,
                     redraw_requested_2,
+                    poll_timer_handle,
                 )
                 .map_err(|e| e.into())
             },
@@ -245,12 +257,23 @@ impl Editor for SoftbufferEditor {
         })
     }
 
-    fn size(&self) -> PhysicalSize<u32> {
-        self.editor_state.physical_size()
+    fn size(&self) -> NativeSize<u32> {
+        NativeSize::from_size(
+            self.editor_state.logical_size().into(),
+            self.editor_state.scale_factor(),
+        )
     }
 
     fn resize_hint(&self) -> ResizeHint {
         RESIZE_HINT
+    }
+
+    unsafe fn assume_standalone_in_process(&self) {
+        // Safety: Editor::assume_standalone_in_process() has the same invariants as
+        // baseview::assume_standalone_in_process()
+        unsafe {
+            baseview::assume_standalone_in_process();
+        }
     }
 }
 
@@ -299,7 +322,7 @@ impl EditorHandle for SoftbufferEditorHandle {
 
     fn set_size(
         &self,
-        new_size: PhysicalSize<u32>,
+        new_size: NativeSize<u32>,
         window: &Self::Window,
     ) -> Result<(), Self::Error> {
         window.resize(new_size)
@@ -316,11 +339,15 @@ impl EditorHandle for SoftbufferEditorHandle {
     /// Return the closest supported size.
     fn adjust_size(
         &self,
-        new_size: PhysicalSize<u32>,
+        new_size: NativeSize<u32>,
         window: &Self::Window,
-    ) -> Option<PhysicalSize<u32>> {
+    ) -> Option<NativeSize<u32>> {
         let current_size = window.size();
-        Some(RESIZE_HINT.adjust_size(new_size, current_size.physical, current_size.scale_factor))
+        Some(RESIZE_HINT.adjust_size(
+            new_size,
+            NativeSize::from_logical_or_physical(current_size.logical, current_size.physical),
+            current_size.scale_factor,
+        ))
     }
 
     fn on_virtual_key_from_host(
@@ -372,12 +399,6 @@ impl SoftbufferEditorState {
 
     pub fn logical_size(&self) -> LogicalSize<f32> {
         self.logical_size.load()
-    }
-
-    pub fn physical_size(&self) -> PhysicalSize<u32> {
-        let logical_size = self.logical_size();
-        let scale_factor = self.scale_factor();
-        logical_size.to_physical(scale_factor)
     }
 
     pub fn scale_factor(&self) -> f64 {

@@ -19,6 +19,9 @@ pub use clap_sys::plugin::{clap_plugin, clap_plugin_descriptor};
 pub use clap_sys::version::CLAP_VERSION;
 use nice_plug_core::context::remote_controls::RemoteControlsContext;
 use nice_plug_core::plugin::Plugin;
+use std::any::Any;
+use std::ffi::{CStr, c_void};
+use std::sync::Arc;
 
 /// Provides auxiliary metadata needed for a CLAP plugin.
 #[allow(unused_variables)]
@@ -44,6 +47,79 @@ pub trait ClapPlugin: Plugin {
     /// that the host can use to provide better hardware mapping for a plugin. See the linked
     /// extension for more information.
     fn remote_controls(&self, context: &mut impl RemoteControlsContext) {}
+
+    /// A custom CLAP plugin extension: the `#[repr(C)]` vtable for extension `id`, for an id
+    /// nice-plug doesn't implement itself (a vendor extension a host queries with
+    /// `get_extension`). `None` for any other id.
+    ///
+    /// The vtable is a `static`. Its functions are called with the `clap_plugin` pointer; they
+    /// reach this plugin's [`extension_state()`][Self::extension_state()] through
+    /// [`clap_extension_state()`].
+    ///
+    /// FTS delta.
+    fn clap_extension(id: &CStr) -> Option<*const c_void> {
+        let _ = id;
+        None
+    }
+
+    /// The state custom extensions run against: shared with the plugin, never the plugin itself
+    /// (it's locked while it processes, so an extension call from the main thread would contend
+    /// with the audio thread). Asked once, when the instance is created.
+    ///
+    /// FTS delta.
+    fn extension_state(&self) -> Option<Arc<dyn Any + Send + Sync>> {
+        None
+    }
+}
+
+/// Ask the host behind `plugin` to read its parameters again: their info and
+/// text (`info`: a parameter renamed, as a slot is when the algorithm behind
+/// it changes) and their values (`values`). From any thread. FTS delta.
+///
+/// # Safety
+///
+/// `plugin` must be a `clap_plugin` nice-plug created for plugin type `P`, still alive.
+pub unsafe fn clap_request_rescan<P: ClapPlugin>(plugin: *const clap_plugin, info: bool, values: bool) {
+    if plugin.is_null() {
+        return;
+    }
+    // SAFETY: the caller's contract.
+    let data = unsafe { (*plugin).plugin_data };
+    if data.is_null() {
+        return;
+    }
+    let wrapper = unsafe { &*(data as *const Wrapper<P>) };
+    wrapper.request_param_rescan(info, values);
+}
+
+/// The CLAP parameter id nice-plug gives the parameter with string id `id`:
+/// what a custom extension maps a host's `clap_id` back to a parameter
+/// with (FTS delta).
+#[must_use]
+pub fn param_clap_id(id: &str) -> u32 {
+    crate::wrapper::util::hash_param_id(id)
+}
+
+/// The [`ClapPlugin::extension_state()`] of the instance behind `plugin`, for a custom
+/// extension's vtable functions.
+///
+/// # Safety
+///
+/// `plugin` must be a `clap_plugin` nice-plug created for plugin type `P`, still alive.
+pub unsafe fn clap_extension_state<P: ClapPlugin>(
+    plugin: *const clap_plugin,
+) -> Option<Arc<dyn Any + Send + Sync>> {
+    if plugin.is_null() {
+        return None;
+    }
+    // SAFETY: the caller's contract: nice-plug's `clap_plugin` for `P`, whose `plugin_data` is
+    // its `Wrapper<P>`.
+    let data = unsafe { (*plugin).plugin_data };
+    if data.is_null() {
+        return None;
+    }
+    let wrapper = unsafe { &*(data as *const Wrapper<P>) };
+    wrapper.extension_state()
 }
 
 /// Configuration for the plugin's polyphonic modulation options, if it supports .

@@ -3,11 +3,12 @@ use iced_baseview::baseview::HandlerError;
 use iced_baseview::shell::SharedWindowSize;
 use iced_baseview::{IcedWindowSettings, PollSubNotifier, Program, baseview, message};
 use nice_plug_core::context::gui::GuiContext;
-use nice_plug_core::editor::dpi::{LogicalSize, PhysicalSize, Size};
+use nice_plug_core::editor::dpi::{LogicalSize, NativeSize, PhysicalSize, Size};
 use nice_plug_core::editor::{
     Editor, EditorHandle, HostMethods, Modifiers, ParentWindowHandle, ResizeHint, SizeConstraints,
     SpawnedEditor, VirtualKeyCode,
 };
+use nice_plug_core::plugin::TrackInfo;
 use std::error::Error;
 use std::sync::{
     Arc, Mutex,
@@ -74,7 +75,8 @@ impl<P: Program + 'static, State: Send + 'static> Editor for IcedEditorInner<P, 
             .with_wait_for_parent(wait_for_parent)
             .with_fallback_scale_factor(fallback_scale_factor)
             .with_ignore_non_modifier_keys(self.settings.ignore_non_modifier_keys)
-            .with_always_redraw(self.settings.always_redraw);
+            .with_always_redraw(self.settings.always_redraw)
+            .with_poll_interval(self.settings.poll_interval);
 
         // The host is a re-implementation of
         // [`baseview::host::HostCallbacks`](https://docs.rs/baseview/latest/baseview/host/trait.HostCallbacks.html)
@@ -147,8 +149,11 @@ impl<P: Program + 'static, State: Send + 'static> Editor for IcedEditorInner<P, 
         })
     }
 
-    fn size(&self) -> PhysicalSize<u32> {
-        self.editor_state.physical_size()
+    fn size(&self) -> NativeSize<u32> {
+        NativeSize::from_size(
+            self.editor_state.logical_size().into(),
+            self.editor_state.system_scale_factor() as f64,
+        )
     }
 
     fn resize_hint(&self) -> nice_plug_core::editor::ResizeHint {
@@ -156,8 +161,22 @@ impl<P: Program + 'static, State: Send + 'static> Editor for IcedEditorInner<P, 
     }
 
     fn track_info_updated(&self, info: nice_plug_core::plugin::TrackInfo) {
-        // TODO: Add a subscription for track information.
-        let _ = info;
+        {
+            *self.editor_state.track_info.lock().unwrap() = info;
+        }
+        self.editor_state
+            .track_info_changed
+            .store(true, Ordering::Release);
+
+        self.notifier.notify();
+    }
+
+    unsafe fn assume_standalone_in_process(&self) {
+        // Safety: Editor::assume_standalone_in_process() has the same invariants as
+        // baseview::assume_standalone_in_process()
+        unsafe {
+            baseview::assume_standalone_in_process();
+        }
     }
 }
 
@@ -207,7 +226,7 @@ impl EditorHandle for IcedEditorHandle {
 
     fn set_size(
         &self,
-        new_size: PhysicalSize<u32>,
+        new_size: NativeSize<u32>,
         window: &Self::Window,
     ) -> Result<(), Self::Error> {
         window.resize(new_size)
@@ -224,13 +243,13 @@ impl EditorHandle for IcedEditorHandle {
     /// Return the closest supported size.
     fn adjust_size(
         &self,
-        new_size: PhysicalSize<u32>,
+        new_size: NativeSize<u32>,
         window: &Self::Window,
-    ) -> Option<PhysicalSize<u32>> {
+    ) -> Option<NativeSize<u32>> {
         let current_size = window.size();
         Some(self.resize_hint.adjust_size(
             new_size,
-            current_size.physical,
+            NativeSize::from_logical_or_physical(current_size.logical, current_size.physical),
             current_size.scale_factor,
         ))
     }
@@ -275,10 +294,13 @@ pub struct IcedEditorState {
     /// should use the system scaling factor instead.
     pub(crate) fallback_scale_factor: AtomicCell<Option<f32>>,
 
-    pub(crate) scale_factor: AtomicCell<Option<f32>>,
+    pub(crate) system_scale_factor: AtomicCell<Option<f32>>,
 
     /// Whether the editor's window is currently open.
     open: AtomicBool,
+
+    track_info_changed: AtomicBool,
+    track_info: Mutex<TrackInfo>,
 }
 
 impl IcedEditorState {
@@ -291,7 +313,9 @@ impl IcedEditorState {
             zoom_factor: AtomicCell::new(scale_factor),
             open: AtomicBool::new(false),
             fallback_scale_factor: AtomicCell::new(None),
-            scale_factor: AtomicCell::new(None),
+            system_scale_factor: AtomicCell::new(None),
+            track_info_changed: AtomicBool::new(false),
+            track_info: Mutex::new(TrackInfo::default()),
         })
     }
 
@@ -299,24 +323,23 @@ impl IcedEditorState {
         self.size.load()
     }
 
-    fn scale_factor(&self) -> f32 {
-        let zoom_factor = self.zoom_factor.load();
-        let scale_factor = self.scale_factor.load();
+    fn system_scale_factor(&self) -> f32 {
+        let scale_factor = self.system_scale_factor.load();
         let fallback_scale_factor = self.fallback_scale_factor.load();
 
-        scale_factor.unwrap_or_else(|| fallback_scale_factor.unwrap_or(1.0) * zoom_factor)
+        scale_factor.unwrap_or_else(|| fallback_scale_factor.unwrap_or(1.0))
     }
 
     pub fn logical_size(&self) -> LogicalSize<f32> {
         let size = self.size.load();
-        let scale_factor = self.scale_factor();
+        let scale_factor = self.system_scale_factor();
 
         size.to_logical(scale_factor as f64)
     }
 
     pub fn physical_size(&self) -> PhysicalSize<u32> {
         let size = self.size.load();
-        let scale_factor = self.scale_factor();
+        let scale_factor = self.system_scale_factor();
 
         size.to_physical(scale_factor as f64)
     }
@@ -338,6 +361,15 @@ impl IcedEditorState {
     /// Whether the GUI is currently visible.
     pub fn is_open(&self) -> bool {
         self.open.load(Ordering::Acquire)
+    }
+
+    /// Returns the new track information if it has changed since the previous call.
+    pub fn new_track_info(&self) -> Option<TrackInfo> {
+        if self.track_info_changed.swap(false, Ordering::Acquire) {
+            Some(self.track_info.lock().unwrap().clone())
+        } else {
+            None
+        }
     }
 }
 
@@ -381,7 +413,7 @@ impl IcedNiceContext {
         let size = self.window_size();
 
         self.editor_state
-            .scale_factor
+            .system_scale_factor
             .store(Some(size.scale_factor as f32));
 
         let old_size = self.editor_state.size.load();
@@ -390,6 +422,11 @@ impl IcedNiceContext {
             Size::Physical(_) => Size::Physical(size.physical),
         };
         self.editor_state.size.store(new_size);
+    }
+
+    /// Returns the new track information if it has changed since the previous call.
+    pub fn new_track_info(&self) -> Option<TrackInfo> {
+        self.editor_state.new_track_info()
     }
 }
 

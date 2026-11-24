@@ -9,7 +9,8 @@ use egui_baseview::baseview::HandlerError;
 use egui_baseview::{EguiWindow, GraphicsConfig};
 use nice_plug_core::context::gui::GuiContext;
 use nice_plug_core::editor::SizeConstraints;
-use nice_plug_core::editor::dpi::{PhysicalSize, Size};
+use nice_plug_core::editor::dpi::NativeSize;
+use nice_plug_core::editor::dpi::Size;
 use nice_plug_core::editor::{
     Editor, EditorHandle, HostMethods, Modifiers, ParentWindowHandle, ResizeHint, SpawnedEditor,
     VirtualKeyCode,
@@ -18,8 +19,8 @@ use parking_lot::Mutex;
 use std::error::Error;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
-#[derive(Default)]
 pub struct EguiNiceSettings {
     /// The window title
     pub title: String,
@@ -34,6 +35,23 @@ pub struct EguiNiceSettings {
     /// fixed-size behavior. To make an editor resizable, return a hint with
     /// `can_resize: true`; the per-axis flags and aspect-ratio fields refine how.
     pub resize_hint: ResizeHint,
+
+    /// The rate at which the [`repaint_notifier`](egui-baseview::repaint_notifier)
+    /// will be polled.
+    ///
+    /// Defaults to `1.0 / 64.0` seconds.
+    pub repaint_poll_interval: Duration,
+}
+
+impl Default for EguiNiceSettings {
+    fn default() -> Self {
+        Self {
+            title: Default::default(),
+            graphics: Default::default(),
+            resize_hint: Default::default(),
+            repaint_poll_interval: Duration::from_secs_f64(1.0 / 64.0),
+        }
+    }
 }
 
 impl EguiNiceSettings {
@@ -67,6 +85,16 @@ impl EguiNiceSettings {
         self.resize_hint = resize_hint;
         self
     }
+
+    /// The rate at which the [`repaint_notifier`](egui-baseview::repaint_notifier)
+    /// will be polled.
+    ///
+    /// Defaults to `1.0 / 64.0` seconds.
+    #[inline]
+    pub fn with_repaint_poll_interval(mut self, interval: Duration) -> Self {
+        self.repaint_poll_interval = interval;
+        self
+    }
 }
 
 struct UserAppWrapper<A: NiceEguiApp> {
@@ -95,7 +123,7 @@ impl<A: NiceEguiApp> egui_baseview::App for UserAppWrapper<A> {
 
     fn resized(&mut self, size: baseview::WindowSize) {
         self.egui_state
-            .scale_factor
+            .system_scale_factor
             .store(Some(size.scale_factor as f32));
 
         let current_size = self.egui_state.size();
@@ -160,7 +188,8 @@ impl<A: NiceEguiApp> Editor for EguiEditor<A> {
             .with_parent(parent.as_ref())
             .with_fallback_scale_factor(fallback_scale_factor)
             .with_wait_for_parent(wait_for_parent)
-            .with_repaint_notifier(self.repaint_notifier.clone());
+            .with_repaint_notifier(self.repaint_notifier.clone())
+            .with_repaint_poll_interval(self.settings.repaint_poll_interval);
 
         let egui_ctx = Arc::new(Mutex::new(None));
 
@@ -231,8 +260,11 @@ impl<A: NiceEguiApp> Editor for EguiEditor<A> {
         })
     }
 
-    fn size(&self) -> PhysicalSize<u32> {
-        self.egui_state.physical_size()
+    fn size(&self) -> NativeSize<u32> {
+        NativeSize::from_size(
+            self.egui_state.logical_size().into(),
+            self.egui_state.system_scale_factor() as f64,
+        )
     }
 
     fn resize_hint(&self) -> nice_plug_core::editor::ResizeHint {
@@ -242,6 +274,14 @@ impl<A: NiceEguiApp> Editor for EguiEditor<A> {
     fn track_info_updated(&self, info: nice_plug_core::plugin::TrackInfo) {
         self.user_app.lock().track_info_changed(info);
         self.repaint_notifier.request_repaint();
+    }
+
+    unsafe fn assume_standalone_in_process(&self) {
+        // Safety: Editor::assume_standalone_in_process() has the same invariants as
+        // baseview::assume_standalone_in_process()
+        unsafe {
+            baseview::assume_standalone_in_process();
+        }
     }
 }
 
@@ -291,7 +331,7 @@ impl EditorHandle for EguiEditorHandle {
 
     fn set_size(
         &self,
-        new_size: PhysicalSize<u32>,
+        new_size: NativeSize<u32>,
         window: &Self::Window,
     ) -> Result<(), Self::Error> {
         window.resize(new_size)
@@ -308,13 +348,13 @@ impl EditorHandle for EguiEditorHandle {
     /// Return the closest supported size.
     fn adjust_size(
         &self,
-        new_size: PhysicalSize<u32>,
+        new_size: NativeSize<u32>,
         window: &Self::Window,
-    ) -> Option<PhysicalSize<u32>> {
+    ) -> Option<NativeSize<u32>> {
         let current_size = window.size();
         Some(self.resize_hint.adjust_size(
             new_size,
-            current_size.physical,
+            NativeSize::from_logical_or_physical(current_size.logical, current_size.physical),
             current_size.scale_factor,
         ))
     }

@@ -2,12 +2,12 @@
 
 use baseview::{
     HandlerError, WindowContext, WindowSettings,
-    dpi::{LogicalSize, PhysicalSize},
+    dpi::LogicalSize,
     gl::{GlConfig, GlContext},
 };
 use crossbeam::atomic::AtomicCell;
 use glow::Context;
-use nice_plug::editor::{EditorHandle, HostMethods, SpawnedEditor};
+use nice_plug::editor::{EditorHandle, HostMethods, SpawnedEditor, dpi::NativeSize};
 use nice_plug::{context::gui::GuiContext, prelude::*};
 use std::{
     error::Error,
@@ -15,6 +15,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+    time::Duration,
 };
 
 use crate::OpenGlError::GlError;
@@ -114,6 +115,7 @@ pub struct GlWindow {
     _gui_context: GuiContext,
     gl: Arc<glow::Context>,
     window: WindowContext,
+    poll_timer_handle: baseview::TimerHandle,
 
     vertex_array: glow::NativeVertexArray,
     program: glow::NativeProgram,
@@ -142,6 +144,7 @@ impl GlWindow {
         params: Arc<MyPluginParams>,
         editor_state: Arc<GlEditorState>,
         redraw_requested: Arc<AtomicBool>,
+        poll_timer_handle: baseview::TimerHandle,
     ) -> Result<Self, OpenGlError> {
         use glow::HasContext as _;
 
@@ -225,16 +228,19 @@ impl GlWindow {
             editor_state,
             window,
             redraw_requested,
+            poll_timer_handle,
         })
     }
 }
 
 impl baseview::WindowHandler for GlWindow {
-    fn on_frame(&self) -> Result<(), HandlerError> {
-        if !self.redraw_requested.swap(false, Ordering::Relaxed) {
-            return Ok(());
+    fn poll(&self) {
+        if self.redraw_requested.swap(false, Ordering::Relaxed) {
+            self.window.request_redraw();
         }
+    }
 
+    fn draw(&self) -> Result<(), HandlerError> {
         // Do rendering here.
 
         use glow::HasContext as _;
@@ -298,6 +304,12 @@ impl baseview::WindowHandler for GlWindow {
         self.redraw_requested.store(true, Ordering::Relaxed);
 
         Ok(())
+    }
+
+    fn on_timer(&self, timer: &baseview::TimerHandle) {
+        if timer == self.poll_timer_handle {
+            self.poll();
+        }
     }
 }
 
@@ -391,12 +403,15 @@ impl Editor for GlEditor {
             move |window: WindowContext| -> Result<GlWindow, HandlerError> {
                 editor_state.scale_factor.store(window.size().scale_factor);
 
+                let poll_timer_handle = window.create_timer(Duration::from_secs_f64(1.0 / 64.0))?;
+
                 GlWindow::new(
                     window,
                     gui_context,
                     params,
                     editor_state,
                     redraw_requested_2,
+                    poll_timer_handle,
                 )
                 .map_err(|e| e.into())
             },
@@ -414,12 +429,23 @@ impl Editor for GlEditor {
         })
     }
 
-    fn size(&self) -> PhysicalSize<u32> {
-        self.editor_state.physical_size()
+    fn size(&self) -> NativeSize<u32> {
+        NativeSize::from_size(
+            self.editor_state.logical_size().into(),
+            self.editor_state.scale_factor(),
+        )
     }
 
     fn resize_hint(&self) -> ResizeHint {
         RESIZE_HINT
+    }
+
+    unsafe fn assume_standalone_in_process(&self) {
+        // Safety: Editor::assume_standalone_in_process() has the same invariants as
+        // baseview::assume_standalone_in_process()
+        unsafe {
+            baseview::assume_standalone_in_process();
+        }
     }
 }
 
@@ -468,7 +494,7 @@ impl EditorHandle for GlEditorHandle {
 
     fn set_size(
         &self,
-        new_size: PhysicalSize<u32>,
+        new_size: NativeSize<u32>,
         window: &Self::Window,
     ) -> Result<(), Self::Error> {
         window.resize(new_size)
@@ -485,11 +511,15 @@ impl EditorHandle for GlEditorHandle {
     /// Return the closest supported size.
     fn adjust_size(
         &self,
-        new_size: PhysicalSize<u32>,
+        new_size: NativeSize<u32>,
         window: &Self::Window,
-    ) -> Option<PhysicalSize<u32>> {
+    ) -> Option<NativeSize<u32>> {
         let current_size = window.size();
-        Some(RESIZE_HINT.adjust_size(new_size, current_size.physical, current_size.scale_factor))
+        Some(RESIZE_HINT.adjust_size(
+            new_size,
+            NativeSize::from_logical_or_physical(current_size.logical, current_size.physical),
+            current_size.scale_factor,
+        ))
     }
 
     fn on_virtual_key_from_host(
@@ -542,12 +572,6 @@ impl GlEditorState {
 
     pub fn logical_size(&self) -> LogicalSize<f32> {
         self.logical_size.load()
-    }
-
-    pub fn physical_size(&self) -> PhysicalSize<u32> {
-        let logical_size = self.logical_size();
-        let scale_factor = self.scale_factor();
-        logical_size.to_physical(scale_factor)
     }
 
     pub fn scale_factor(&self) -> f64 {
