@@ -70,6 +70,20 @@ pub trait ClapPlugin: Plugin {
     fn extension_state(&self) -> Option<Arc<dyn Any + Send + Sync>> {
         None
     }
+
+    /// Called once, from the host's `init()` (main thread), with the instance's
+    /// [`extension_state()`](Self::extension_state), its own `clap_plugin` and
+    /// its host: what a custom extension needs to call the host on its own
+    /// (query the host's extensions, ask it to rescan parameters) before the
+    /// host has called any of the plugin's. Both pointers live as long as the
+    /// instance. FTS delta.
+    fn clap_init(
+        state: &Arc<dyn Any + Send + Sync>,
+        plugin: *const clap_plugin,
+        host: *const clap_host,
+    ) {
+        let _ = (state, plugin, host);
+    }
 }
 
 /// Ask the host behind `plugin` to read its parameters again: their info and
