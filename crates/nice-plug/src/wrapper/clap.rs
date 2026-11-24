@@ -72,6 +72,14 @@ pub trait ClapPlugin: Plugin {
     }
 }
 
+/// The CLAP parameter id nice-plug gives the parameter with string id `id`:
+/// what a custom extension maps a host's `clap_id` back to a parameter
+/// with (FTS delta).
+#[must_use]
+pub fn param_clap_id(id: &str) -> u32 {
+    crate::wrapper::util::hash_param_id(id)
+}
+
 /// The [`ClapPlugin::extension_state()`] of the instance behind `plugin`, for a custom
 /// extension's vtable functions.
 ///
