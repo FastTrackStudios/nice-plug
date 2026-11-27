@@ -1,21 +1,34 @@
+// A browser runs a plugin in-process and exports none: there only the
+// trait and its subcategories, which a plugin implements whatever it
+// exports (the wrapper needs an OS event loop and COM).
+#[cfg(not(target_arch = "wasm32"))]
 #[macro_use]
 mod util;
 
+#[cfg(not(target_arch = "wasm32"))]
 mod context;
+#[cfg(not(target_arch = "wasm32"))]
 mod factory;
+#[cfg(not(target_arch = "wasm32"))]
 mod inner;
+#[cfg(not(target_arch = "wasm32"))]
 mod note_expressions;
+#[cfg(not(target_arch = "wasm32"))]
 mod param_units;
 pub mod subcategories;
+#[cfg(not(target_arch = "wasm32"))]
 mod wrapper;
 
-#[cfg(feature = "editor")]
+#[cfg(all(feature = "editor", not(target_arch = "wasm32")))]
 mod view;
 
 /// Re-export for the wrapper.
+#[cfg(not(target_arch = "wasm32"))]
 pub use factory::PluginInfo;
 use nice_plug_core::plugin::Plugin;
+#[cfg(not(target_arch = "wasm32"))]
 pub use vst3;
+#[cfg(not(target_arch = "wasm32"))]
 pub use wrapper::Wrapper;
 
 use crate::wrapper::vst3::subcategories::Vst3SubCategory;

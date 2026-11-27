@@ -5,6 +5,7 @@ use std::fs::File;
 use std::io::{self, Stderr, Write};
 use std::path::Path;
 use std::sync::Mutex;
+#[cfg(not(target_arch = "wasm32"))]
 use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
 
 #[cfg(windows)]
@@ -46,7 +47,11 @@ pub enum NiceLogWriter {
     #[cfg(windows)]
     WinDbg(windbg::WinDbgWriter),
     /// Writes to the file.
+    #[cfg(not(target_arch = "wasm32"))]
     File(NonBlocking, WorkerGuard),
+    /// Writes to the file. A browser has no threads for a writer of its own.
+    #[cfg(target_arch = "wasm32")]
+    File(File, ()),
 }
 
 impl Debug for NiceLogWriter {
@@ -128,9 +133,13 @@ impl NiceLogWriter {
     /// Construct an [`NiceLogWriter`] for doing buffered writes to a file.
     pub fn new_file_path<P: AsRef<Path>>(path: P) -> Result<Self, std::io::Error> {
         let file = File::options().create(true).append(true).open(path)?;
-        let (writer, guard) = NonBlocking::new(file);
-
-        Ok(Self::File(writer, guard))
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let (writer, guard) = NonBlocking::new(file);
+            Ok(Self::File(writer, guard))
+        }
+        #[cfg(target_arch = "wasm32")]
+        Ok(Self::File(file, ()))
     }
 
     /// Returns a writer that can be written to using the [`write!()`] and [`writeln!()`] macros.
